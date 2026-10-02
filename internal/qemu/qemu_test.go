@@ -90,6 +90,23 @@ func TestDiscover(t *testing.T) {
 
 // startFakeMonitor serves one HMP exchange the way QEMU does over a unix
 // socket: banner, prompt, readline echo of the command, reply, prompt.
+// socketDir is a short-pathed temp directory for unix sockets. Their paths are
+// limited to ~104 bytes on macOS (108 on Linux), and t.TempDir() embeds the
+// test's name under a long per-user temp root there, which can blow the limit.
+func socketDir(t *testing.T) string {
+	t.Helper()
+	base := ""
+	if st, err := os.Stat("/tmp"); err == nil && st.IsDir() {
+		base = "/tmp"
+	}
+	dir, err := os.MkdirTemp(base, "qt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 func startFakeMonitor(t *testing.T, path string, replies map[string]string) (*net.UnixListener, <-chan string) {
 	t.Helper()
 	ln, err := net.Listen("unix", path)
@@ -121,7 +138,7 @@ func startFakeMonitor(t *testing.T, path string, replies map[string]string) (*ne
 }
 
 func TestMonitorCommand(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "vm-monitor.socket")
+	sock := filepath.Join(socketDir(t), "vm-monitor.socket")
 	startFakeMonitor(t, sock, map[string]string{"info status": "VM status: running"})
 	out, err := MonitorCommand(sock, "info status", 2*time.Second)
 	if err != nil {
@@ -133,7 +150,7 @@ func TestMonitorCommand(t *testing.T) {
 }
 
 func TestMonitorEmptyReply(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "vm-monitor.socket")
+	sock := filepath.Join(socketDir(t), "vm-monitor.socket")
 	_, received := startFakeMonitor(t, sock, nil)
 	out, err := MonitorCommand(sock, "system_powerdown", 2*time.Second)
 	if err != nil {
@@ -148,7 +165,7 @@ func TestMonitorEmptyReply(t *testing.T) {
 }
 
 func TestMonitorSilentServerTimesOut(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "vm-monitor.socket")
+	sock := filepath.Join(socketDir(t), "vm-monitor.socket")
 	ln, err := net.Listen("unix", sock) // accepts into the backlog, never speaks: like a busy monitor
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +178,7 @@ func TestMonitorSilentServerTimesOut(t *testing.T) {
 }
 
 func TestQueryStatusRunningThenStale(t *testing.T) {
-	dir := t.TempDir()
+	dir := socketDir(t)
 	conf := filepath.Join(dir, "vm.conf")
 	writeFile(t, conf, "disk_img=\""+filepath.Join(dir, "disk.qcow2")+"\"\n")
 	vm := VM{ConfPath: conf}
