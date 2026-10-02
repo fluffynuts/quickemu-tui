@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestFormatVersion(t *testing.T) {
 	for _, c := range []struct{ version, commit, built, want string }{
@@ -13,5 +17,27 @@ func TestFormatVersion(t *testing.T) {
 		if got := formatVersion(c.version, c.commit, c.built); got != c.want {
 			t.Errorf("formatVersion(%q, %q, %q) = %q, want %q", c.version, c.commit, c.built, got, c.want)
 		}
+	}
+}
+
+func TestEnsureVMDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "vms", "nested")
+	for range 2 { // creates it, then is happy that it already exists
+		if err := ensureVMDir(dir); err != nil {
+			t.Fatalf("ensureVMDir(%q): %v", dir, err)
+		}
+		if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+			t.Fatalf("%q isn't a directory after ensureVMDir: %v", dir, err)
+		}
+	}
+}
+
+func TestEnsureVMDirReportsAFileInTheWay(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "vms")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureVMDir(file); err == nil {
+		t.Errorf("ensureVMDir(%q) succeeded on a plain file", file)
 	}
 }

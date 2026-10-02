@@ -101,6 +101,16 @@ func runUpgrade() int {
 	return 0
 }
 
+// ensureVMDir creates the VM directory if it's missing (first run, or removed
+// since): quickget runs inside it, and fails with a misleading
+// "fork/exec .../quickget: no such file or directory" when it doesn't exist.
+func ensureVMDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("creating VM directory %s: %w", dir, err)
+	}
+	return nil
+}
+
 // resolveDir returns the VM directory from the config file, asking the user
 // (and saving the answer) on first run. It returns "" if the user cancels.
 func resolveDir(def string) (string, error) {
@@ -166,6 +176,10 @@ func main() {
 	*dir = config.ExpandHome(*dir)
 	root, err := filepath.Abs(*dir)
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "quickemu-tui:", err)
+		os.Exit(2)
+	}
+	if err := ensureVMDir(root); err != nil {
 		fmt.Fprintln(os.Stderr, "quickemu-tui:", err)
 		os.Exit(2)
 	}
