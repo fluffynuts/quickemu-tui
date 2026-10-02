@@ -38,6 +38,8 @@ const (
 	modeMenu
 	modeSnapDelete
 	modeError
+	modeInstallPick
+	modeInstallProgress
 )
 
 type pane int
@@ -111,6 +113,15 @@ type Model struct {
 	delVM     qemu.VM
 	delCursor int
 	delPicked map[string]bool // snapshot key -> ticked
+
+	catalog        qemu.Catalog
+	catalogLoading bool
+	instStep       installStep
+	instFilter     string
+	instCursor     int
+	instOS         string
+	instRelease    string
+	install        *installState
 
 	errTitle  string
 	errReturn mode
@@ -471,6 +482,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rediscover()
 		return m, batch(tick(), m.pollNow())
 
+	case catalogMsg:
+		m.catalogLoading = false
+		if msg.err != nil {
+			if m.mode == modeInstallPick {
+				m.mode = modeNormal
+			}
+			m.showError("Couldn't list installable systems", msg.err.Error())
+			return m, nil
+		}
+		m.catalog = msg.catalog
+		return m, nil
+
+	case installProgressMsg:
+		return m.onInstallProgress(msg)
+
+	case installDoneMsg:
+		return m.onInstallDone(msg)
+
 	case pollNowMsg:
 		return m, m.pollNow()
 
@@ -569,6 +598,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleSnapDeleteKey(msg.String())
 		case modeError:
 			return m.handleErrorKey(msg)
+		case modeInstallPick:
+			return m.handleInstallPickKey(msg)
+		case modeInstallProgress:
+			return m.handleInstallProgressKey(msg.String())
 		default:
 			return m.handleNormalKey(msg.String())
 		}
@@ -588,6 +621,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) requestQuit() (tea.Model, tea.Cmd) {
+	if m.install != nil && m.mode != modeConfirm {
+		m.askConfirm("A VM install ("+m.install.title+") is still downloading. Quit and stop it?\nPartly downloaded files are kept so it can resume.", func(m *Model) tea.Cmd {
+			m.stopInstall()
+			return tea.Quit
+		})
+		return m, nil
+	}
 	if m.busy > 0 && m.mode != modeConfirm {
 		m.askConfirm("An operation is still running. Quit anyway?", func(*Model) tea.Cmd { return tea.Quit })
 		return m, nil
@@ -666,6 +706,8 @@ func (m Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
 	case "enter":
 		m.openMenu()
 		return m, nil
+	case "n":
+		return m, m.openInstall()
 	}
 	return m, nil
 }

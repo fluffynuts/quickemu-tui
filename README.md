@@ -29,6 +29,7 @@ by their respective keys.
 | --- | --- |
 | ↑/k ↓/j, tab | move; switch between VM list and snapshot list |
 | r, ?, q | refresh, help, quit (VMs keep running after you quit) |
+| n | install a new VM with `quickget` (see below) |
 | enter | open the actions menu for the selected VM (↑↓ then enter runs one; esc closes) |
 
 The keys below are shortcuts that work **inside the actions menu only**: pressing one is the same as choosing its item.
@@ -42,6 +43,21 @@ The keys below are shortcuts that work **inside the actions menu only**: pressin
 | l | logs: quickemu's log, the launch output, the generated launch script |
 | x | ssh in via the forwarded port |
 | o | open the VM folder |
+
+## Installing a new VM
+
+Press `n`. The list of what can be installed comes from `quickget --list-csv`
+(so it always matches your installed quickemu): pick an OS (type to filter),
+a release, and an edition if there is one, then confirm. `quickget` runs in
+your VM directory and the new VM appears in the list when it finishes.
+
+A progress dialog shows a bar and percentage (parsed from curl's progress
+output). `esc` keeps the download running in the background, with its progress
+in the header, and `n` brings the dialog back. `c` cancels; partial downloads
+are kept, so installing the same thing again resumes it. Quitting during an
+install asks first. If `quickget` exits 0 but printed errors (it does this
+after a failed unzip), the install is reported as having problems rather than
+as a success.
 
 ## How it works
 

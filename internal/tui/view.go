@@ -27,9 +27,10 @@ var (
 	modalStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("12")).Padding(1, 2)
 )
 
-const shortKeys = "↑↓ select • tab pane • enter actions • r refresh • ? help • q quit"
+const shortKeys = "↑↓ select • tab pane • enter actions • n new VM • r refresh • ? help • q quit"
 
-const fullHelp = `  ↑/k ↓/j  move          tab    switch VM list / snapshot list      r  refresh
+const fullHelp = `  n  install a new VM (quickget): pick OS, release, edition; shows download progress
+  ↑/k ↓/j  move          tab    switch VM list / snapshot list      r  refresh
   enter    open the actions menu for the selected VM. Inside it, press an item's key
            (s start, p shutdown, K force stop, c create, a/A revert, d delete snapshots, m media, e edit,
            l logs, x ssh, o open folder) or move to it and press enter.
@@ -61,6 +62,7 @@ func (m Model) viewHeader() string {
 	if m.busy > 0 || len(m.launching) > 0 {
 		h += "  " + m.spin.View()
 	}
+	h += m.installHeader()
 	return h
 }
 
@@ -85,6 +87,10 @@ func (m Model) viewKeys() string {
 		keys = "y yes • n no"
 	case modeMedia:
 		keys = "↑↓ select • enter/c insert image • e eject • r refresh • esc close"
+	case modeInstallPick:
+		keys = "type to filter • ↑↓ pgup pgdn • enter select • esc back"
+	case modeInstallProgress:
+		keys = "esc keep running in background • c cancel"
 	case modeError:
 		keys = "↑↓ pgup pgdn home end scroll • esc/enter close"
 	case modeSnapDelete:
@@ -132,7 +138,7 @@ func (m Model) viewVMList(w, h int) string {
 		rows = append(rows, stateDot(info.status, m.launching[vm.ConfPath])+" "+name)
 	}
 	if len(rows) == 0 {
-		rows = append(rows, dimStyle.Render(trunc("no *.conf files here", inner)))
+		rows = append(rows, dimStyle.Render(trunc("no VMs yet: n installs one", inner)))
 	}
 	content := titleStyle.Render("VMs") + "\n" + strings.Join(windowAround(rows, m.cursor, h-3), "\n")
 	return paneFor(m.pane == paneVMs).Width(w - 2).Height(h - 2).Render(content)
@@ -235,6 +241,10 @@ func (m Model) viewModal() string {
 		return modalStyle.Render(m.viewMedia())
 	case modeSnapDelete:
 		return modalStyle.Render(m.viewSnapDelete())
+	case modeInstallPick:
+		return modalStyle.Render(m.viewInstallPick())
+	case modeInstallProgress:
+		return modalStyle.Render(m.viewInstallProgress())
 	case modeError:
 		return modalStyle.BorderForeground(lipgloss.Color("9")).Padding(0, 1).Render(errStyle.Render(m.errTitle) + "\n\n" + m.errView.View())
 	case modeLogs:

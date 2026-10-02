@@ -1,0 +1,407 @@
+package tui
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+	"unicode"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/fluffynuts/quickemu-tui/internal/qemu"
+)
+
+type installStep int
+
+const (
+	stepOS installStep = iota
+	stepRelease
+	stepEdition
+)
+
+// pickItem is one row in the install picker.
+type pickItem struct {
+	value string
+	label string
+	hint  string // dim text after the label
+}
+
+// installState is a download in flight. The channel and cancel funcs are
+// shared by every copy of the Model.
+type installState struct {
+	os, release, edition string
+	title                string
+	percent              float64 // -1: quickget isn't reporting one
+	line                 string
+	started              time.Time
+	msgs                 chan tea.Msg
+	cancel               context.CancelFunc
+	finished             chan struct{} // closed once quickget has exited
+}
+
+type catalogMsg struct {
+	catalog qemu.Catalog
+	err     error
+}
+
+type installProgressMsg qemu.InstallProgress
+
+type installDoneMsg struct {
+	output string // quickget's own output, minus progress bars
+	err    error
+}
+
+// --- opening the picker -----------------------------------------------------
+
+func (m *Model) openInstall() tea.Cmd {
+	if m.install != nil {
+		m.mode = modeInstallProgress
+		return nil
+	}
+	m.mode = modeInstallPick
+	m.instStep = stepOS
+	m.instFilter, m.instCursor = "", 0
+	m.instOS, m.instRelease = "", ""
+	if len(m.catalog) > 0 || m.catalogLoading {
+		return nil
+	}
+	q, err := qemu.FindQuickget(m.opts.Quickemu)
+	if err != nil {
+		m.mode = modeNormal
+		m.setFlash("quickget not found on PATH (it ships with quickemu)", true)
+		return nil
+	}
+	m.catalogLoading = true
+	return func() tea.Msg {
+		c, err := qemu.LoadCatalog(q)
+		return catalogMsg{catalog: c, err: err}
+	}
+}
+
+func (m Model) instItems() []pickItem {
+	var items []pickItem
+	switch m.instStep {
+	case stepOS:
+		for _, o := range m.catalog.OSes() {
+			items = append(items, pickItem{value: o.ID, label: o.DisplayName, hint: o.ID})
+		}
+	case stepRelease:
+		for _, r := range m.catalog.Releases(m.instOS) {
+			items = append(items, pickItem{value: r, label: r})
+		}
+	case stepEdition:
+		for _, e := range m.catalog.Editions(m.instOS, m.instRelease) {
+			label := e
+			if e == "" {
+				label = "(default)"
+			}
+			items = append(items, pickItem{value: e, label: label})
+		}
+	}
+	if m.instFilter == "" {
+		return items
+	}
+	needle := strings.ToLower(m.instFilter)
+	var out []pickItem
+	for _, it := range items {
+		if strings.Contains(strings.ToLower(it.label+" "+it.hint), needle) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+func (m Model) handleInstallPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	items := m.instItems()
+	switch msg.String() {
+	case "ctrl+c":
+		return m.requestQuit()
+	case "esc":
+		switch {
+		case m.instFilter != "":
+			m.instFilter = ""
+		case m.instStep == stepOS:
+			m.mode = modeNormal
+		default:
+			m.instStep = m.stepBack()
+		}
+		m.instCursor = 0
+		return m, nil
+	case "up":
+		m.instCursor = clamp(m.instCursor-1, 0, len(items)-1)
+	case "down":
+		m.instCursor = clamp(m.instCursor+1, 0, len(items)-1)
+	case "pgup":
+		m.instCursor = clamp(m.instCursor-10, 0, len(items)-1)
+	case "pgdown":
+		m.instCursor = clamp(m.instCursor+10, 0, len(items)-1)
+	case "backspace":
+		if r := []rune(m.instFilter); len(r) > 0 {
+			m.instFilter = string(r[:len(r)-1])
+			m.instCursor = 0
+		}
+	case "enter":
+		if len(items) == 0 || m.catalogLoading {
+			return m, nil
+		}
+		return m.pickItem(items[clamp(m.instCursor, 0, len(items)-1)])
+	default:
+		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+			for _, r := range msg.Runes {
+				if unicode.IsPrint(r) {
+					m.instFilter += string(r)
+				}
+			}
+			if msg.Type == tea.KeySpace {
+				m.instFilter += " "
+			}
+			m.instCursor = 0
+		}
+	}
+	return m, nil
+}
+
+// stepBack is the step before the current one, skipping steps that had
+// nothing to choose.
+func (m Model) stepBack() installStep {
+	if m.instStep == stepEdition && len(m.catalog.Releases(m.instOS)) > 1 {
+		return stepRelease
+	}
+	return stepOS
+}
+
+func (m Model) pickItem(it pickItem) (tea.Model, tea.Cmd) {
+	m.instFilter, m.instCursor = "", 0
+	switch m.instStep {
+	case stepOS:
+		m.instOS = it.value
+		m.instStep = stepRelease
+		if len(m.catalog.Releases(it.value)) == 1 { // nothing to choose
+			m.instRelease = m.catalog.Releases(it.value)[0]
+			return m.afterRelease()
+		}
+	case stepRelease:
+		m.instRelease = it.value
+		return m.afterRelease()
+	case stepEdition:
+		return m.confirmInstall(it.value)
+	}
+	return m, nil
+}
+
+func (m Model) afterRelease() (tea.Model, tea.Cmd) {
+	if len(m.catalog.Editions(m.instOS, m.instRelease)) > 0 {
+		m.instStep = stepEdition
+		return m, nil
+	}
+	return m.confirmInstall("")
+}
+
+func (m Model) confirmInstall(edition string) (tea.Model, tea.Cmd) {
+	name := m.catalog.DisplayName(m.instOS)
+	what := strings.TrimSpace(name + " " + m.instRelease + " " + edition)
+	target := tildify(m.opts.Root)
+	// back out of the picker only if confirmed; "no" returns to the picker
+	m.askConfirm(fmt.Sprintf("Download %s and create a VM in %s?\n\nImages can be several GB. Progress is shown while it downloads,\nand a cancelled download can be resumed by installing it again.", what, target), func(m *Model) tea.Cmd {
+		return m.startInstall(name, m.instOS, m.instRelease, edition)
+	})
+	return m, nil
+}
+
+// --- running the install ----------------------------------------------------
+
+func (m *Model) startInstall(displayName, os, release, edition string) tea.Cmd {
+	q, err := qemu.FindQuickget(m.opts.Quickemu)
+	if err != nil {
+		m.mode = modeNormal
+		m.setFlash("quickget not found on PATH (it ships with quickemu)", true)
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	st := &installState{
+		os: os, release: release, edition: edition,
+		title:    strings.TrimSpace(displayName + " " + release + " " + edition),
+		percent:  -1,
+		started:  time.Now(),
+		msgs:     make(chan tea.Msg, 64),
+		cancel:   cancel,
+		finished: make(chan struct{}),
+	}
+	m.install = st
+	m.mode = modeInstallProgress
+	root := m.opts.Root
+	go func() {
+		defer close(st.finished)
+		output, err := qemu.Install(ctx, q, root, os, release, edition, func(p qemu.InstallProgress) {
+			select {
+			case st.msgs <- installProgressMsg(p):
+			default: // the UI is behind; a later update will catch it up
+			}
+		})
+		st.msgs <- installDoneMsg{output: output, err: err}
+	}()
+	return waitInstall(st)
+}
+
+func waitInstall(st *installState) tea.Cmd {
+	return func() tea.Msg { return <-st.msgs }
+}
+
+// stopInstall cancels a running install and waits briefly for quickget to exit.
+func (m *Model) stopInstall() {
+	if m.install == nil {
+		return
+	}
+	m.install.cancel()
+	select {
+	case <-m.install.finished:
+	case <-time.After(6 * time.Second):
+	}
+}
+
+func (m Model) handleInstallProgressKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "ctrl+c":
+		return m.requestQuit()
+	case "esc", "enter", "b":
+		m.mode = modeNormal // keeps running; n brings this back
+	case "c":
+		if m.install != nil {
+			m.askConfirm("Cancel the install of "+m.install.title+"?\nPartly downloaded files are kept so it can resume.", func(m *Model) tea.Cmd {
+				if m.install != nil {
+					m.install.cancel()
+				}
+				return nil
+			})
+		}
+	}
+	return m, nil
+}
+
+func (m Model) onInstallProgress(p installProgressMsg) (tea.Model, tea.Cmd) {
+	if m.install == nil {
+		return m, nil
+	}
+	if p.Line != "" {
+		m.install.line = p.Line
+	}
+	if p.Percent >= 0 {
+		m.install.percent = p.Percent
+	}
+	return m, waitInstall(m.install)
+}
+
+func (m Model) onInstallDone(msg installDoneMsg) (tea.Model, tea.Cmd) {
+	st := m.install
+	m.install = nil
+	if m.mode == modeInstallProgress || m.mode == modeInstallPick {
+		m.mode = modeNormal
+	}
+	switch {
+	case st == nil:
+	case errors.Is(msg.err, context.Canceled):
+		m.setFlash("Install of "+st.title+" cancelled; install it again to resume", true)
+	case msg.err != nil:
+		m.setFlash(st.title+" install failed: "+firstLine(msg.err.Error()), true)
+		m.showError(st.title+" install failed", msg.err.Error())
+	case qemu.OutputLooksFailed(msg.output):
+		// quickget exits 0 even after e.g. a failed unzip, then writes a .conf
+		m.setFlash(st.title+": quickget reported problems, the VM probably won't boot", true)
+		m.showError(st.title+" finished with problems", msg.output)
+	default:
+		m.setFlash(st.title+" installed ✓", false)
+	}
+	m.rediscover()
+	return m, batch(m.pollNow(), m.loadSelectedDisk())
+}
+
+// --- views ------------------------------------------------------------------
+
+var installStepTitles = map[installStep]string{
+	stepOS: "operating system", stepRelease: "release", stepEdition: "edition",
+}
+
+func (m Model) viewInstallPick() string {
+	title := "New VM: choose " + installStepTitles[m.instStep]
+	if m.instStep != stepOS {
+		title = "New VM: " + m.catalog.DisplayName(m.instOS)
+		if m.instStep == stepEdition {
+			title += " " + m.instRelease
+		}
+		title += " – choose " + installStepTitles[m.instStep]
+	}
+	lines := []string{titleStyle.Render(title), ""}
+	if m.catalogLoading {
+		return strings.Join(append(lines, dimStyle.Render("asking quickget what it can install…")), "\n")
+	}
+	lines = append(lines, "filter: "+m.instFilter+dimStyle.Render("▏"), "")
+	items := m.instItems()
+	if len(items) == 0 {
+		lines = append(lines, dimStyle.Render("nothing matches"))
+	}
+	cursor := clamp(m.instCursor, 0, len(items)-1)
+	rows := make([]string, len(items))
+	width := 0
+	for _, it := range items {
+		width = max(width, lipgloss.Width(it.label))
+	}
+	width = min(width, 40)
+	for i, it := range items {
+		row := " " + trunc(it.label, 40) + strings.Repeat(" ", width-min(lipgloss.Width(it.label), 40))
+		if it.hint != "" {
+			row += "  " + it.hint
+		}
+		row += " "
+		if i == cursor {
+			row = selStyle.Render(row)
+		}
+		rows[i] = row
+	}
+	lines = append(lines, windowAround(rows, cursor, max(3, min(14, m.height-16)))...)
+	lines = append(lines, "", dimStyle.Render(fmt.Sprintf("%d shown • type to filter • enter select • esc back", len(items))))
+	return strings.Join(lines, "\n")
+}
+
+const progressBarWidth = 40
+
+func progressBar(pct float64) string {
+	filled := int(pct/100*progressBarWidth + 0.5)
+	filled = clamp(filled, 0, progressBarWidth)
+	return okStyle.Render(strings.Repeat("█", filled)) + dimStyle.Render(strings.Repeat("░", progressBarWidth-filled))
+}
+
+func (m Model) viewInstallProgress() string {
+	st := m.install
+	if st == nil {
+		return ""
+	}
+	lines := []string{titleStyle.Render("Installing " + st.title), ""}
+	if st.percent >= 0 {
+		lines = append(lines, fmt.Sprintf("%s  %5.1f%%", progressBar(st.percent), st.percent))
+	} else {
+		lines = append(lines, "working… "+dimStyle.Render("(no percentage reported yet)"))
+	}
+	line := st.line
+	if line == "" {
+		line = "starting quickget…"
+	}
+	lines = append(lines, "", dimStyle.Render(trunc(line, progressBarWidth+8)),
+		dimStyle.Render("elapsed "+time.Since(st.started).Truncate(time.Second).String()),
+		"", dimStyle.Render("esc/b keep running in background • c cancel • n reopens this"))
+	return strings.Join(lines, "\n")
+}
+
+// installHeader is the short status shown in the header while installing.
+func (m Model) installHeader() string {
+	if m.install == nil {
+		return ""
+	}
+	s := "  ⬇ " + m.install.title
+	if m.install.percent >= 0 {
+		s += fmt.Sprintf(" %.0f%%", m.install.percent)
+	}
+	return warnStyle.Render(s)
+}
