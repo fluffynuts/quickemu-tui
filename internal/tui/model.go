@@ -35,6 +35,9 @@ const (
 	modeConfirm
 	modeMedia
 	modeLogs
+	modeMenu
+	modeSnapDelete
+	modeError
 )
 
 type pane int
@@ -78,6 +81,7 @@ type Model struct {
 	snapCursor int
 	pane       pane
 	mode       mode
+	menuCursor int
 	returnMode mode
 	showHelp   bool
 	width      int
@@ -103,6 +107,15 @@ type Model struct {
 	mediaCursor  int
 	mediaErr     error
 	mediaLoading bool
+
+	delVM     qemu.VM
+	delCursor int
+	delPicked map[string]bool // snapshot key -> ticked
+
+	errTitle  string
+	errReturn mode
+	errBody   string
+	errView   viewport.Model
 
 	logIndex int
 	logView  viewport.Model
@@ -168,6 +181,7 @@ func New(opts Options) Model {
 		spin:         sp,
 		input:        ti,
 		logView:      viewport.New(80, 20),
+		errView:      viewport.New(80, 10),
 		pollInFlight: true, // Init issues the first poll
 	}
 	m.rediscover()
@@ -351,7 +365,8 @@ func (m *Model) startVM(vm qemu.VM) tea.Cmd {
 	}
 	cmd, err := qemu.Start(vm, q)
 	if err != nil {
-		m.setFlash("Starting "+vm.Name()+" failed: "+err.Error(), true)
+		m.setFlash("Starting "+vm.Name()+" failed: "+firstLine(err.Error()), true)
+		m.showError("Starting "+vm.Name()+" failed", err.Error())
 		return nil
 	}
 	conf := vm.ConfPath
@@ -437,6 +452,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.logView.Width = max(20, msg.Width-6)
 		m.logView.Height = max(3, msg.Height-7)
+		m.sizeErrView()
 		if m.mode == modeLogs {
 			m.loadLog()
 		}
@@ -479,6 +495,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.busy--
 		if msg.err != nil {
 			m.setFlash(msg.label+" failed: "+firstLine(msg.err.Error()), true)
+			m.showError(msg.label+" failed", msg.err.Error())
 		} else {
 			m.setFlash(msg.label+" ✓", false)
 		}
@@ -506,7 +523,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					detail = qemu.LastLine(qemu.ReadTail(p.LaunchLog, 64*1024))
 				}
 			}
-			m.setFlash(fmt.Sprintf("quickemu exited (%v): %s (l for logs)", msg.err, detail), true)
+			m.setFlash(fmt.Sprintf("quickemu exited (%v): %s", msg.err, detail), true)
+			m.showError("quickemu exited", fmt.Sprintf("%v\n\n%s", msg.err, detail))
 		}
 		return m, m.pollNow()
 
@@ -524,7 +542,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case execDoneMsg:
 		if msg.err != nil {
-			m.setFlash(msg.label+": "+msg.err.Error(), true)
+			m.setFlash(msg.label+": "+firstLine(msg.err.Error()), true)
+			m.showError(msg.label+" failed", msg.err.Error())
 		} else {
 			m.setFlash(msg.label+" done", false)
 		}
@@ -544,6 +563,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleMediaKey(msg.String())
 		case modeLogs:
 			return m.handleLogsKey(msg)
+		case modeMenu:
+			return m.handleMenuKey(msg.String())
+		case modeSnapDelete:
+			return m.handleSnapDeleteKey(msg.String())
+		case modeError:
+			return m.handleErrorKey(msg)
 		default:
 			return m.handleNormalKey(msg.String())
 		}
@@ -556,6 +581,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input, cmd = m.input.Update(msg)
 	case modeLogs:
 		m.logView, cmd = m.logView.Update(msg)
+	case modeError:
+		m.errView, cmd = m.errView.Update(msg)
 	}
 	return m, cmd
 }
@@ -636,8 +663,16 @@ func (m Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
 	case "r":
 		m.rediscover()
 		return m, batch(m.pollNow(), m.loadSelectedDisk())
+	case "enter":
+		m.openMenu()
+		return m, nil
 	}
+	return m, nil
+}
 
+// runAction performs a VM action by its key. Actions are only reachable
+// through the actions menu (by choosing the item or pressing its key).
+func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 	vm, ok := m.selected()
 	if !ok {
 		return m, nil
@@ -768,7 +803,19 @@ func (m Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
 			})
 		})
 
-	case "a", "A", "d":
+	case "d":
+		if up {
+			m.setFlash(needsOff, true)
+			return m, nil
+		}
+		if len(m.snapshots(vm)) == 0 {
+			m.setFlash("No snapshots to delete", true)
+			return m, nil
+		}
+		m.openSnapDelete(vm)
+		return m, nil
+
+	case "a", "A":
 		if up {
 			m.setFlash(needsOff, true)
 			return m, nil
@@ -780,14 +827,6 @@ func (m Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
 		}
 		snap := snaps[m.snapCursor]
 		ref := snap.Ref()
-		if key == "d" {
-			m.askConfirm("Delete snapshot '"+ref+"' of "+vm.Name()+"?", func(m *Model) tea.Cmd {
-				return m.startOp("Delete '"+ref+"'", vm, opDoneMsg{refreshDisk: true}, func() error {
-					return qemu.DeleteSnapshot(vm, ref)
-				})
-			})
-			return m, nil
-		}
 		startAfter := key == "A"
 		verb := "Revert"
 		if startAfter {

@@ -27,14 +27,13 @@ var (
 	modalStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("12")).Padding(1, 2)
 )
 
-const shortKeys = "↑↓ select • tab pane • s start • p shutdown • K kill • c snap • a revert • A revert+start • d delete • m media • e edit • l logs • x ssh • ? help • q quit"
+const shortKeys = "↑↓ select • tab pane • enter actions • r refresh • ? help • q quit"
 
-const fullHelp = `  ↑/k ↓/j  move          tab   switch VM list / snapshot list     r  refresh
-  s  start               p     ACPI shutdown (guest decides)      K  force stop
-  c  create snapshot     a     revert to selected snapshot        A  revert, then start
-  d  delete snapshot     m     swap/eject ISOs (running VM)       e  edit .conf in $EDITOR
-  l  logs                x     ssh in via forwarded port          o  open VM folder
-  ?  toggle help         q     quit (VMs keep running)`
+const fullHelp = `  ↑/k ↓/j  move          tab    switch VM list / snapshot list      r  refresh
+  enter    open the actions menu for the selected VM. Inside it, press an item's key
+           (s start, p shutdown, K force stop, c create, a/A revert, d delete snapshots, m media, e edit,
+           l logs, x ssh, o open folder) or move to it and press enter.
+  ?  toggle help         q      quit (VMs keep running)`
 
 // View renders the UI.
 func (m Model) View() string {
@@ -46,9 +45,12 @@ func (m Model) View() string {
 	bodyHeight := max(5, m.height-lipgloss.Height(header)-lipgloss.Height(footer))
 
 	var body string
-	if m.mode == modeNormal {
+	switch m.mode {
+	case modeNormal:
 		body = m.viewMain(bodyHeight)
-	} else {
+	case modeMenu:
+		body = overlay(m.viewMain(bodyHeight), m.viewMenu(), m.width, bodyHeight)
+	default:
 		body = lipgloss.Place(m.width, bodyHeight, lipgloss.Center, lipgloss.Center, m.viewModal())
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
@@ -83,6 +85,12 @@ func (m Model) viewKeys() string {
 		keys = "y yes • n no"
 	case modeMedia:
 		keys = "↑↓ select • enter/c insert image • e eject • r refresh • esc close"
+	case modeError:
+		keys = "↑↓ pgup pgdn home end scroll • esc/enter close"
+	case modeSnapDelete:
+		keys = "↑↓ move • space tick • a all/none • enter delete ticked • esc cancel"
+	case modeMenu:
+		keys = "↑↓ select • enter or item key run • esc close"
 	case modeLogs:
 		keys = "tab next file • r reload • ↑↓ pgup pgdn scroll • esc close"
 	default:
@@ -225,6 +233,10 @@ func (m Model) viewModal() string {
 		return modalStyle.Width(max(30, min(70, m.width-4))).Render(m.confirmText + "\n\n" + dimStyle.Render("y / n"))
 	case modeMedia:
 		return modalStyle.Render(m.viewMedia())
+	case modeSnapDelete:
+		return modalStyle.Render(m.viewSnapDelete())
+	case modeError:
+		return modalStyle.BorderForeground(lipgloss.Color("9")).Padding(0, 1).Render(errStyle.Render(m.errTitle) + "\n\n" + m.errView.View())
 	case modeLogs:
 		return modalStyle.Padding(0, 1).Render(m.viewLogs())
 	}

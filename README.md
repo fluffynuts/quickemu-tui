@@ -28,14 +28,20 @@ by their respective keys.
 | key | action |
 | --- | --- |
 | ↑/k ↓/j, tab | move; switch between VM list and snapshot list |
+| r, ?, q | refresh, help, quit (VMs keep running after you quit) |
+| enter | open the actions menu for the selected VM (↑↓ then enter runs one; esc closes) |
+
+The keys below are shortcuts that work **inside the actions menu only**: pressing one is the same as choosing its item.
+
+| key | action |
+| --- | --- |
 | s / p / K | start / ACPI shutdown / force stop (`quickemu --kill`, falls back to monitor `quit`) |
-| c / a / A / d | create snapshot / revert / revert then start / delete |
+| c / a / A / d | create snapshot / revert / revert then start / delete: `d` opens a checklist (space ticks, `a` ticks all, enter deletes the ticked ones after confirming) |
 | m | removable media: swap or eject ISOs on a running VM |
 | e | edit the `.conf` in `$VISUAL`/`$EDITOR` (nano if unset) |
 | l | logs: quickemu's log, the launch output, the generated launch script |
 | x | ssh in via the forwarded port |
 | o | open the VM folder |
-| r, ?, q | refresh, help, quit (VMs keep running after you quit) |
 
 ## How it works
 
