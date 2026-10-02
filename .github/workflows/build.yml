@@ -145,7 +145,7 @@ jobs:
           install quickemu-tui-*/quickemu-tui ~/.local/bin/
           \`\`\`
 
-          To upgrade, do the same with the newer zip.
+          To upgrade, run \`quickemu-tui --upgrade\`, or repeat the steps above with the newer zip.
 
           | Platform | Zip |
           |---|---|

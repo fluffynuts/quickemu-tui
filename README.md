@@ -16,7 +16,16 @@ go build -o quickemu-tui .
 `dist/quickemu-tui-0.1.7-macos-arm64.zip`. CI (`.github/workflows/build.yml`)
 does this for Linux and macOS on amd64 and arm64, and each push to `master`
 publishes a release: the version is `VERSION` (major.minor, bump by hand) plus
-the CI run number. `quickemu-tui -version` prints it.
+the CI run number. `quickemu-tui -version` prints it with the commit and build
+time, e.g. `quickemu-tui 0.1.57 (c84a1bb6abd5, built 2026-10-02T13:23:26Z)`; a
+build from uncommitted changes shows `-dirty` after the commit.
+
+To upgrade an installed copy, run `quickemu-tui --upgrade`: it downloads the
+latest GitHub release for your platform, checks it against the release's
+`SHA256SUMS`, confirms the new binary runs, and only then replaces the old one
+(in place, keeping its permissions). It does nothing if you're already on the
+latest. The binary has to be in a directory you can write to; otherwise run it
+with `sudo`.
 
 Run it from anywhere:
 

@@ -9,7 +9,16 @@ LDFLAGS ?= -s -w
 VERSION      := $(shell tr -d '[:space:]' < VERSION)
 BUILD        ?= 0
 FULL_VERSION := $(VERSION).$(BUILD)
-BUILD_LDFLAGS = $(LDFLAGS) -X main.version=$(FULL_VERSION)
+
+# Stamped into the binary for `quickemu-tui -version`: the short commit (with
+# "-dirty" if there are uncommitted or untracked-but-not-ignored files) and the
+# UTC build time. Evaluated once per make run. Override COMMIT when building
+# from a source tarball with no .git.
+GIT_SHA      := $(shell git rev-parse --short=12 HEAD 2>/dev/null)
+GIT_DIRTY    := $(shell [ -n "$$(git status --porcelain 2>/dev/null)" ] && echo -dirty)
+COMMIT       ?= $(if $(GIT_SHA),$(GIT_SHA)$(GIT_DIRTY))
+BUILD_DATE   ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+BUILD_LDFLAGS = $(LDFLAGS) -X main.version=$(FULL_VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)
 
 # `make dist` cross-compiles for GOOS/GOARCH (default: this machine) and zips
 # the result. Zip names say "macos" rather than "darwin".

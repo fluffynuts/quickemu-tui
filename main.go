@@ -2,19 +2,104 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/fluffynuts/quickemu-tui/internal/config"
 	"github.com/fluffynuts/quickemu-tui/internal/tui"
+	"github.com/fluffynuts/quickemu-tui/internal/upgrade"
 )
 
-// version is set at build time (-ldflags "-X main.version=...").
-var version = "dev"
+// Set at build time by the Makefile (-ldflags "-X main.version=...").
+var (
+	version   = "dev"
+	commit    = "" // short git SHA, with "-dirty" if built from uncommitted changes
+	buildDate = "" // UTC, RFC 3339
+)
+
+// versionString is what -version prints, e.g.
+// "quickemu-tui 0.1.57 (c84a1bb6abd5, built 2026-10-02T13:23:26Z)".
+func versionString() string {
+	c := commit
+	if c == "" {
+		c = vcsRevision() // a plain `go build` still records the commit
+	}
+	return formatVersion(version, c, buildDate)
+}
+
+func formatVersion(version, commit, built string) string {
+	var meta []string
+	if commit != "" {
+		meta = append(meta, commit)
+	}
+	if built != "" {
+		meta = append(meta, "built "+built)
+	}
+	s := "quickemu-tui " + version
+	if len(meta) > 0 {
+		s += " (" + strings.Join(meta, ", ") + ")"
+	}
+	return s
+}
+
+// vcsRevision reads the commit Go embedded at build time, if any.
+func vcsRevision() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	rev, dirty := "", false
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if len(rev) > 12 {
+		rev = rev[:12]
+	}
+	if rev != "" && dirty {
+		rev += "-dirty"
+	}
+	return rev
+}
+
+// runUpgrade replaces this binary with the latest GitHub release and returns
+// the process exit code.
+func runUpgrade() int {
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "quickemu-tui: can't tell where this binary is:", err)
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	_, err = upgrade.Run(ctx, upgrade.Options{
+		Current: version,
+		ExePath: exe,
+		GOOS:    runtime.GOOS,
+		GOARCH:  runtime.GOARCH,
+		// lets the upgrade be tried against a stand-in for GitHub
+		APIBase: os.Getenv("QUICKEMU_TUI_API_BASE"),
+		Log:     func(format string, args ...any) { fmt.Printf(format+"\n", args...) },
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "quickemu-tui: upgrade failed:", err)
+		return 1
+	}
+	return 0
+}
 
 // resolveDir returns the VM directory from the config file, asking the user
 // (and saving the answer) on first run. It returns "" if the user cancels.
@@ -53,10 +138,14 @@ func main() {
 	dir := flag.String("dir", filepath.Join(home, "quickemu"), "directory containing quickemu *.conf files (or pass it as the first argument)")
 	quickemu := flag.String("quickemu", "", "path to quickemu (default: found on PATH)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	doUpgrade := flag.Bool("upgrade", false, "download the latest release for this machine from GitHub and replace this binary")
 	flag.Parse()
 	if *showVersion {
-		fmt.Println("quickemu-tui", version)
+		fmt.Println(versionString())
 		return
+	}
+	if *doUpgrade {
+		os.Exit(runUpgrade())
 	}
 	explicit := flag.NArg() > 0
 	flag.Visit(func(f *flag.Flag) { explicit = explicit || f.Name == "dir" })
