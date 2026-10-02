@@ -279,3 +279,69 @@ func TestStartupFetchPopulatesCacheAndModel(t *testing.T) {
 		t.Fatalf("cache not used: %d OSes", got)
 	}
 }
+
+// quickgetMaking returns a fake quickget that creates a VM whose ISO is made by isoCmd.
+func quickgetMaking(t *testing.T, isoCmd string) {
+	t.Helper()
+	dir := t.TempDir()
+	writeScript(t, dir, "quickget", `mkdir -p "$1-$2"
+printf 'guest_os="windows"\ndisk_img="%s/disk.qcow2"\niso="%s/Win.iso"\n' "$1-$2" "$1-$2" > "$1-$2.conf"
+`+isoCmd+"\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func runInstall(t *testing.T) Model {
+	t.Helper()
+	m := newInstallModel(t)
+	cmd := m.startInstall("Windows", "windows", "11", "")
+	for i := 0; i < 20 && m.install != nil; i++ {
+		next, c := m.Update(cmd())
+		m, cmd = next.(Model), c
+	}
+	return m
+}
+
+func TestInstallWarnsWhenTheISOIsReallyAWebPage(t *testing.T) {
+	quickgetMaking(t, `echo '<!DOCTYPE html><html><head><title>Not found</title></head></html>' > "$1-$2/Win.iso"`)
+	m := runInstall(t)
+
+	win := filepath.Join(m.opts.Root, "windows-11", "Win.iso")
+	if m.mode != modeError || !m.flashErr || strings.Contains(m.flash, "installed ✓") {
+		t.Fatalf("expected a warning: mode=%v flash=%q", m.mode, m.flash)
+	}
+	for _, want := range []string{
+		"Windows 11 needs an installation ISO",
+		win, // the full path
+		"HTML web page",
+		"Download a genuine ISO",
+		filepath.Join(m.opts.Root, "windows-11.conf"),
+	} {
+		if !strings.Contains(m.errTitle+"\n"+m.errBody, want) {
+			t.Errorf("warning lacks %q:\n%s", want, m.errBody)
+		}
+	}
+	if !strings.Contains(m.flash, win) {
+		t.Errorf("flash should name the file too: %q", m.flash)
+	}
+	// the VM itself is still created and listed
+	if len(m.vms) != 1 {
+		t.Errorf("vms = %d", len(m.vms))
+	}
+}
+
+func TestInstallWithRealISOIsAPlainSuccess(t *testing.T) {
+	quickgetMaking(t, `{ head -c 32768 /dev/zero; printf '\001CD001'; head -c 4000 /dev/zero; } > "$1-$2/Win.iso"`)
+	m := runInstall(t)
+	if m.mode == modeError || m.flashErr || !strings.Contains(m.flash, "installed ✓") {
+		t.Fatalf("a valid ISO was flagged: mode=%v flash=%q err=%q", m.mode, m.flash, m.errBody)
+	}
+}
+
+func TestInstallWarnsWhenTheISOIsMissing(t *testing.T) {
+	quickgetMaking(t, `true`) // conf says iso=…/Win.iso but nothing was downloaded
+	m := runInstall(t)
+	if m.mode != modeError || !strings.Contains(m.errBody, "does not exist") ||
+		!strings.Contains(m.errBody, filepath.Join(m.opts.Root, "windows-11", "Win.iso")) {
+		t.Fatalf("mode=%v body=%q", m.mode, m.errBody)
+	}
+}

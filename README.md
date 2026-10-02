@@ -66,6 +66,15 @@ install asks first. If `quickget` exits 0 but printed errors (it does this
 after a failed unzip), the install is reported as having problems rather than
 as a success.
 
+When an install finishes, the new VM's installation images are checked: the
+files its `.conf` names with `iso=` / `fixed_iso=`, plus any `*.iso` in its
+folder. A real image has an ISO 9660 (or UDF) signature at byte 32768; a vendor
+that has moved its download typically leaves a saved web page under the `.iso`
+name instead (Windows is the usual offender). If an image is missing or isn't a
+real ISO, a dialog gives its full path, what is wrong with it, and tells you to
+download a genuine ISO and save it at that path (or edit `iso=` in the `.conf`).
+The VM is still created.
+
 ## Deleting a VM
 
 `D` in the actions menu removes the `.conf`, the VM's folder (where its disk

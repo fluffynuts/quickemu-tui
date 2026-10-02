@@ -107,6 +107,9 @@ type installDoneMsg struct {
 	err      error
 	added    []string // default options merged into the new VM's .conf
 	mergeErr error
+
+	confs       []string          // the .conf files this install created
+	isoProblems []qemu.ISOProblem // installation images that are missing or not real ISOs
 }
 
 // confSet is the set of .conf paths in dir.
@@ -314,11 +317,15 @@ func (m *Model) startInstall(displayName, os, release, edition string) tea.Cmd {
 				if before[path] {
 					continue
 				}
+				done.confs = append(done.confs, path)
 				added, mergeErr := qemu.ApplyDefaults(path, defaults)
 				done.added = append(done.added, added...)
 				if mergeErr != nil {
 					done.mergeErr = mergeErr
 				}
+				// quickget can "succeed" having saved a web page where the ISO
+				// should be (e.g. a vendor moved the download)
+				done.isoProblems = append(done.isoProblems, qemu.VerifyISOs(qemu.VM{ConfPath: path})...)
 			}
 		}
 		st.msgs <- done
@@ -387,15 +394,52 @@ func (m Model) onInstallDone(msg installDoneMsg) (tea.Model, tea.Cmd) {
 	case msg.err != nil:
 		m.setFlash(st.title+" install failed: "+firstLine(msg.err.Error()), true)
 		m.showError(st.title+" install failed", msg.err.Error())
-	case qemu.OutputLooksFailed(msg.output):
-		// quickget exits 0 even after e.g. a failed unzip, then writes a .conf
+	default:
+		m.reportInstalled(st, msg)
+	}
+	m.rediscover()
+	return m, batch(m.pollNow(), m.loadSelectedDisk())
+}
+
+// reportInstalled tells the user how a finished install went: a plain success,
+// or a dialog if the VM was created but can't be installed from as it stands.
+func (m *Model) reportInstalled(st *installState, msg installDoneMsg) {
+	isoBad := len(msg.isoProblems) > 0
+	outputBad := qemu.OutputLooksFailed(msg.output) // quickget exits 0 even after e.g. a failed unzip
+	switch {
+	case isoBad:
+		m.setFlash(st.title+": the installation ISO is not usable: "+msg.isoProblems[0].Path, true)
+		report := isoReport(st.title, msg.isoProblems, msg.confs)
+		if outputBad {
+			report += "\n\nquickget also reported:\n" + msg.output
+		}
+		m.showError(st.title+" needs an installation ISO", report)
+	case outputBad:
 		m.setFlash(st.title+": quickget reported problems, the VM probably won't boot", true)
 		m.showError(st.title+" finished with problems", msg.output)
 	default:
 		m.setFlash(st.title+" installed ✓"+defaultsNote(msg.added, msg.mergeErr), msg.mergeErr != nil)
 	}
-	m.rediscover()
-	return m, batch(m.pollNow(), m.loadSelectedDisk())
+}
+
+// isoReport explains missing/invalid ISOs, with full paths.
+func isoReport(title string, problems []qemu.ISOProblem, confs []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "The VM for %s was created, but its installation ISO is not usable, so it can't be installed from.\n", title)
+	for _, p := range problems {
+		fmt.Fprintf(&b, "\n  %s\n    %s\n", p.Path, p.Reason)
+	}
+	b.WriteString("\nDownload a genuine ISO yourself from the vendor's site")
+	if len(problems) == 1 {
+		fmt.Fprintf(&b, " and save it as the path above (replacing that file)")
+	} else {
+		b.WriteString(" and save it over the file(s) above")
+	}
+	if len(confs) > 0 {
+		fmt.Fprintf(&b, ", or point iso= at it in %s", confs[0])
+	}
+	b.WriteString(".")
+	return b.String()
 }
 
 // --- views ------------------------------------------------------------------
