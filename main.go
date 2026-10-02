@@ -39,7 +39,7 @@ func resolveDir(def string) (string, error) {
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
-	if err := config.Save(path, config.Config{VMDir: dir}); err != nil {
+	if err := config.Update(path, func(c *config.Config) { c.VMDir = dir }); err != nil {
 		return "", fmt.Errorf("saving %s: %w", path, err)
 	}
 	return dir, nil
@@ -73,7 +73,17 @@ func main() {
 		os.Exit(2)
 	}
 
-	program := tea.NewProgram(tui.New(tui.Options{Root: root, Quickemu: *quickemu}), tea.WithAltScreen())
+	opts := tui.Options{Root: root, Quickemu: *quickemu}
+	if path, err := config.Path(); err == nil {
+		opts.ConfigPath = path
+		if cfg, err := config.Load(path); err == nil && cfg != nil {
+			opts.Defaults = cfg.DefaultConf
+		} else if err != nil {
+			fmt.Fprintln(os.Stderr, "quickemu-tui: ignoring unreadable config:", err)
+		}
+	}
+
+	program := tea.NewProgram(tui.New(opts), tea.WithAltScreen())
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "quickemu-tui:", err)
 		os.Exit(1)

@@ -27,9 +27,10 @@ var (
 	modalStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("12")).Padding(1, 2)
 )
 
-const shortKeys = "↑↓ select • tab pane • enter actions • n new VM • r refresh • ? help • q quit"
+const shortKeys = "↑↓ select • tab pane • enter actions • n new VM • d defaults • r refresh • ? help • q quit"
 
-const fullHelp = `  n  install a new VM (quickget): pick OS, release, edition; shows download progress
+const fullHelp = `  d  default VM options (e.g. gl="off"): added to new VMs, and to existing ones on start if unset
+  n  install a new VM (quickget): pick OS, release, edition; shows download progress
   ↑/k ↓/j  move          tab    switch VM list / snapshot list      r  refresh
   enter    open the actions menu for the selected VM. Inside it, press an item's key
            (s start, p shutdown, K force stop, c create, a/A revert, d delete snapshots, m media, e edit,
@@ -87,6 +88,8 @@ func (m Model) viewKeys() string {
 		keys = "y yes • n no"
 	case modeMedia:
 		keys = "↑↓ select • enter/c insert image • e eject • r refresh • esc close"
+	case modeDefaults:
+		keys = "ctrl+s save • esc discard"
 	case modeInstallPick:
 		keys = "type to filter • ↑↓ pgup pgdn • enter select • esc back"
 	case modeInstallProgress:
@@ -241,6 +244,8 @@ func (m Model) viewModal() string {
 		return modalStyle.Render(m.viewMedia())
 	case modeSnapDelete:
 		return modalStyle.Render(m.viewSnapDelete())
+	case modeDefaults:
+		return modalStyle.Render(m.viewDefaults())
 	case modeInstallPick:
 		return modalStyle.Render(m.viewInstallPick())
 	case modeInstallProgress:

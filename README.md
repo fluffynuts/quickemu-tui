@@ -29,6 +29,7 @@ by their respective keys.
 | --- | --- |
 | ↑/k ↓/j, tab | move; switch between VM list and snapshot list |
 | r, ?, q | refresh, help, quit (VMs keep running after you quit) |
+| d | edit default VM options (see below) |
 | n | install a new VM with `quickget` (see below) |
 | enter | open the actions menu for the selected VM (↑↓ then enter runs one; esc closes) |
 
@@ -58,6 +59,22 @@ are kept, so installing the same thing again resumes it. Quitting during an
 install asks first. If `quickget` exits 0 but printed errors (it does this
 after a failed unzip), the install is reported as having problems rather than
 as a success.
+
+## Default VM options
+
+Some settings are needed on every VM on a given machine (for example
+`gl="off"` when quickemu shows nothing with GL on). Press `d` to list them,
+one `key="value"` per line, as they'd appear in a `.conf`; `ctrl+s` saves. They
+are stored in the user config file (`default_conf`, next to `vm_dir`).
+
+- **New VMs** get all of them added to their `.conf` when `quickget` finishes.
+- **Existing VMs** get the ones their `.conf` doesn't already set, when you
+  start them. A value the VM sets itself always wins, so an explicit
+  `gl="on"` is never overwritten. (A commented-out `#gl="on"` counts as unset.)
+
+Because quickemu runs the `.conf` as a bash script, only plain assignments are
+accepted: lines with `;`, `&`, `|`, redirections, backticks or `$(...)` outside
+quotes are rejected.
 
 ## How it works
 

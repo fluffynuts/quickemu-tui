@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -40,6 +41,7 @@ const (
 	modeError
 	modeInstallPick
 	modeInstallProgress
+	modeDefaults
 )
 
 type pane int
@@ -51,8 +53,10 @@ const (
 
 // Options configure the TUI.
 type Options struct {
-	Root     string // directory holding quickemu *.conf files
-	Quickemu string // explicit quickemu path; empty means look it up on PATH
+	Root       string   // directory holding quickemu *.conf files
+	Quickemu   string   // explicit quickemu path; empty means look it up on PATH
+	ConfigPath string   // user config file; empty if there is nowhere to save settings
+	Defaults   []string // default .conf lines, merged into VMs (see qemu.MergeDefaults)
 }
 
 // vmInfo is gathered off the UI thread on every poll, so View() never does IO.
@@ -113,6 +117,10 @@ type Model struct {
 	delVM     qemu.VM
 	delCursor int
 	delPicked map[string]bool // snapshot key -> ticked
+
+	defaults []string
+	defInput textarea.Model
+	defErr   string
 
 	catalog        qemu.Catalog
 	catalogLoading bool
@@ -193,6 +201,8 @@ func New(opts Options) Model {
 		input:        ti,
 		logView:      viewport.New(80, 20),
 		errView:      viewport.New(80, 10),
+		defaults:     opts.Defaults,
+		defInput:     newDefaultsInput(),
 		pollInFlight: true, // Init issues the first poll
 	}
 	m.rediscover()
@@ -374,6 +384,8 @@ func (m *Model) startVM(vm qemu.VM) tea.Cmd {
 		m.setFlash("quickemu not found on PATH (pass -quickemu)", true)
 		return nil
 	}
+	// fill in the user's default options the conf hasn't set (never overriding it)
+	added, mergeErr := applyDefaultsTo(m.defaults, vm.ConfPath)
 	cmd, err := qemu.Start(vm, q)
 	if err != nil {
 		m.setFlash("Starting "+vm.Name()+" failed: "+firstLine(err.Error()), true)
@@ -382,7 +394,7 @@ func (m *Model) startVM(vm qemu.VM) tea.Cmd {
 	}
 	conf := vm.ConfPath
 	m.launching[conf] = true
-	m.setFlash("Starting "+vm.Name()+"…", false)
+	m.setFlash("Starting "+vm.Name()+"…"+defaultsNote(added, mergeErr), mergeErr != nil)
 	return batch(
 		m.ensureSpin(),
 		func() tea.Msg { return launchExitedMsg{conf: conf, err: cmd.Wait()} },
@@ -602,6 +614,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleInstallPickKey(msg)
 		case modeInstallProgress:
 			return m.handleInstallProgressKey(msg.String())
+		case modeDefaults:
+			return m.handleDefaultsKey(msg)
 		default:
 			return m.handleNormalKey(msg.String())
 		}
@@ -616,6 +630,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logView, cmd = m.logView.Update(msg)
 	case modeError:
 		m.errView, cmd = m.errView.Update(msg)
+	case modeDefaults:
+		m.defInput, cmd = m.defInput.Update(msg)
 	}
 	return m, cmd
 }
@@ -708,6 +724,8 @@ func (m Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "n":
 		return m, m.openInstall()
+	case "d":
+		return m, m.openDefaults()
 	}
 	return m, nil
 }

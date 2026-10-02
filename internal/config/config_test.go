@@ -33,3 +33,17 @@ func TestExpandHome(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateKeepsOtherSettings(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := Update(p, func(c *Config) { c.VMDir = "/vms" }); err != nil {
+		t.Fatal(err)
+	}
+	if err := Update(p, func(c *Config) { c.DefaultConf = []string{`gl="off"`} }); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil || c == nil || c.VMDir != "/vms" || len(c.DefaultConf) != 1 || c.DefaultConf[0] != `gl="off"` {
+		t.Fatalf("got %+v, %v", c, err)
+	}
+}

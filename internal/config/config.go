@@ -11,7 +11,11 @@ import (
 // Config is the on-disk settings file.
 type Config struct {
 	// VMDir is the directory holding quickemu *.conf files.
-	VMDir string `json:"vm_dir"`
+	VMDir string `json:"vm_dir,omitempty"`
+
+	// DefaultConf are `key="value"` lines merged into new VMs' .conf files, and
+	// into existing ones (for keys they don't set) when the VM is started.
+	DefaultConf []string `json:"default_conf,omitempty"`
 }
 
 // Path returns the config file location (<user config dir>/quickemu-tui/config.json).
@@ -50,6 +54,20 @@ func Save(path string, c Config) error {
 		return err
 	}
 	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+// Update loads the config (an empty one on first run), applies fn and saves,
+// so changing one setting never drops the others.
+func Update(path string, fn func(*Config)) error {
+	c, err := Load(path)
+	if err != nil {
+		return err
+	}
+	if c == nil {
+		c = &Config{}
+	}
+	fn(c)
+	return Save(path, *c)
 }
 
 // ExpandHome expands a leading "~" or "~/" to the user's home directory.

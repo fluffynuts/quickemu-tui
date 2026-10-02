@@ -50,8 +50,20 @@ type catalogMsg struct {
 type installProgressMsg qemu.InstallProgress
 
 type installDoneMsg struct {
-	output string // quickget's own output, minus progress bars
-	err    error
+	output   string // quickget's own output, minus progress bars
+	err      error
+	added    []string // default options merged into the new VM's .conf
+	mergeErr error
+}
+
+// confSet is the set of .conf paths in dir.
+func confSet(dir string) map[string]bool {
+	vms, _ := qemu.Discover(dir)
+	set := make(map[string]bool, len(vms))
+	for _, vm := range vms {
+		set[vm.ConfPath] = true
+	}
+	return set
 }
 
 // --- opening the picker -----------------------------------------------------
@@ -204,8 +216,12 @@ func (m Model) confirmInstall(edition string) (tea.Model, tea.Cmd) {
 	name := m.catalog.DisplayName(m.instOS)
 	what := strings.TrimSpace(name + " " + m.instRelease + " " + edition)
 	target := tildify(m.opts.Root)
+	extra := ""
+	if n := len(m.defaults); n > 0 {
+		extra = fmt.Sprintf("\n\nYour %d default option(s) will be added to its .conf.", n)
+	}
 	// back out of the picker only if confirmed; "no" returns to the picker
-	m.askConfirm(fmt.Sprintf("Download %s and create a VM in %s?\n\nImages can be several GB. Progress is shown while it downloads,\nand a cancelled download can be resumed by installing it again.", what, target), func(m *Model) tea.Cmd {
+	m.askConfirm(fmt.Sprintf("Download %s and create a VM in %s?\n\nImages can be several GB. Progress is shown while it downloads,\nand a cancelled download can be resumed by installing it again.%s", what, target, extra), func(m *Model) tea.Cmd {
 		return m.startInstall(name, m.instOS, m.instRelease, edition)
 	})
 	return m, nil
@@ -233,15 +249,31 @@ func (m *Model) startInstall(displayName, os, release, edition string) tea.Cmd {
 	m.install = st
 	m.mode = modeInstallProgress
 	root := m.opts.Root
+	defaults := append([]string(nil), m.defaults...)
 	go func() {
 		defer close(st.finished)
+		before := confSet(root)
 		output, err := qemu.Install(ctx, q, root, os, release, edition, func(p qemu.InstallProgress) {
 			select {
 			case st.msgs <- installProgressMsg(p):
 			default: // the UI is behind; a later update will catch it up
 			}
 		})
-		st.msgs <- installDoneMsg{output: output, err: err}
+		done := installDoneMsg{output: output, err: err}
+		if err == nil {
+			// the .conf quickget just wrote gets the user's default options
+			for path := range confSet(root) {
+				if before[path] {
+					continue
+				}
+				added, mergeErr := qemu.ApplyDefaults(path, defaults)
+				done.added = append(done.added, added...)
+				if mergeErr != nil {
+					done.mergeErr = mergeErr
+				}
+			}
+		}
+		st.msgs <- done
 	}()
 	return waitInstall(st)
 }
@@ -312,7 +344,7 @@ func (m Model) onInstallDone(msg installDoneMsg) (tea.Model, tea.Cmd) {
 		m.setFlash(st.title+": quickget reported problems, the VM probably won't boot", true)
 		m.showError(st.title+" finished with problems", msg.output)
 	default:
-		m.setFlash(st.title+" installed ✓", false)
+		m.setFlash(st.title+" installed ✓"+defaultsNote(msg.added, msg.mergeErr), msg.mergeErr != nil)
 	}
 	m.rediscover()
 	return m, batch(m.pollNow(), m.loadSelectedDisk())
