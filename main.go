@@ -13,6 +13,9 @@ import (
 	"github.com/fluffynuts/quickemu-tui/internal/tui"
 )
 
+// version is set at build time (-ldflags "-X main.version=...").
+var version = "dev"
+
 // resolveDir returns the VM directory from the config file, asking the user
 // (and saving the answer) on first run. It returns "" if the user cancels.
 func resolveDir(def string) (string, error) {
@@ -49,7 +52,12 @@ func main() {
 	home, _ := os.UserHomeDir()
 	dir := flag.String("dir", filepath.Join(home, "quickemu"), "directory containing quickemu *.conf files (or pass it as the first argument)")
 	quickemu := flag.String("quickemu", "", "path to quickemu (default: found on PATH)")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("quickemu-tui", version)
+		return
+	}
 	explicit := flag.NArg() > 0
 	flag.Visit(func(f *flag.Flag) { explicit = explicit || f.Name == "dir" })
 	if flag.NArg() > 0 {

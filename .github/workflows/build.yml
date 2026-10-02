@@ -1,0 +1,174 @@
+# Builds a zip for every platform on every push: the quickemu-tui binary and
+# the README (see the Makefile's dist target, which does the packaging). The
+# zips are attached to the workflow run as artifacts, and a push to master
+# also publishes them as a GitHub release.
+#
+# Platforms are Linux and macOS (amd64 and arm64): the app drives quickemu and
+# QEMU, which don't run on Windows, and it uses Unix process groups, so it
+# doesn't build there either.
+#
+# Release versions are VERSION (major.minor, bumped by hand) plus the run
+# number as the third part: 0.1.57. Every push to master is released, so the
+# run number is what tells those releases apart, and it keeps each release a
+# valid semantic version that GitHub sorts above the last.
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
+# Reading the repo is all this needs: uploading a run's artifacts is
+# authorised by the run itself, not by the token's permissions.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # The snapshot and ISO tests drive the real tools and skip themselves
+      # when they're missing, so give Linux the tools and let them run.
+      - name: Install qemu-img and genisoimage
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-utils genisoimage
+      - run: go vet ./...
+      - run: go test ./...
+
+  package:
+    name: package (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+    # Every target is cross-compiled from Linux: quickemu-tui has no cgo, and
+    # zip(1) there is what keeps the binary's executable bit in the archive.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Package
+        id: dist
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          # The version's third part, in the zip's name and in the binary.
+          BUILD: ${{ github.run_number }}
+        run: |
+          zip=$(make -s dist | tail -n 1)
+          echo "zip=$zip" >>"$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.dist.outputs.zip }}
+          # Upload the zip as it is: the artifact's own zipping would wrap it
+          # in a second zip, and drops file permissions besides.
+          archive: false
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: package
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    # Publishing a release creates its tag, which is a write to the repo;
+    # only this job asks for that.
+    permissions:
+      contents: write
+    # Two quick pushes must not race to publish.
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: quickemu-tui-*.zip
+          merge-multiple: true
+          path: dist
+          # Keep the zips as they are. Left to itself this unpacks each one
+          # into a folder, and re-zipping those would lose the executable
+          # bit the package job's zip(1) kept.
+          skip-decompress: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD: ${{ github.run_number }}
+        run: |
+          version="$(tr -d '[:space:]' <VERSION).$BUILD"
+          tag="v$version"
+          # Found rather than globbed at dist/*.zip, so it doesn't matter
+          # exactly where download-artifact puts them — and each one is
+          # checked to be a zip before anything is published.
+          mapfile -t zips < <(find dist -type f -name 'quickemu-tui-*.zip' | sort)
+          if [ "${#zips[@]}" -eq 0 ]; then
+            echo "::error::no release zips found under dist/"
+            find dist -ls
+            exit 1
+          fi
+          # Published under fixed names (quickemu-tui-linux-amd64.zip, ...), so
+          # releases/latest/download/<name> always works; the version is in
+          # the tag, in the folder inside each zip, and in quickemu-tui
+          # -version. SHA256SUMS lets people check a download before
+          # unpacking it.
+          mkdir -p release
+          for zip in "${zips[@]}"; do
+            unzip -tq "$zip" >/dev/null || { echo "::error::$zip is not a valid zip"; exit 1; }
+            name=$(basename "$zip")
+            cp "$zip" "release/${name/-$version/}"
+          done
+          (cd release && sha256sum quickemu-tui-*.zip >SHA256SUMS)
+          cat release/SHA256SUMS
+          assets=(release/quickemu-tui-*.zip release/SHA256SUMS)
+          notes=$(cat <<EOF
+          quickemu-tui is a terminal UI for quickemu VMs. It needs \`quickemu\` (which provides \`quickget\`) and \`qemu-img\` installed.
+
+          To install, download the zip for your platform (below), unzip it, and put \`quickemu-tui\` somewhere on your PATH:
+
+          \`\`\`sh
+          unzip quickemu-tui-linux-amd64.zip
+          install quickemu-tui-*/quickemu-tui ~/.local/bin/
+          \`\`\`
+
+          To upgrade, do the same with the newer zip.
+
+          | Platform | Zip |
+          |---|---|
+          | Linux (x86-64) | \`quickemu-tui-linux-amd64.zip\` |
+          | Linux (ARM) | \`quickemu-tui-linux-arm64.zip\` |
+          | macOS (Apple Silicon) | \`quickemu-tui-macos-arm64.zip\` |
+          | macOS (Intel) | \`quickemu-tui-macos-amd64.zip\` |
+
+          \`SHA256SUMS\` holds each zip's checksum: check a download with \`sha256sum -c --ignore-missing SHA256SUMS\`.
+
+          macOS: the binary isn't signed, so if it's blocked after downloading in a browser, run
+          \`xattr -dr com.apple.quarantine <folder>\` once.
+          EOF
+          )
+          # A re-run of the same workflow run finds its release already made,
+          # and replaces the zips rather than failing.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${assets[@]}" --clobber
+          else
+            gh release create "$tag" "${assets[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "quickemu-tui $version" \
+              --notes "$notes" \
+              --generate-notes \
+              --latest
+          fi

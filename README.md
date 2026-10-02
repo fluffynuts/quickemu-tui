@@ -12,6 +12,12 @@ go test ./...        # core logic: conf parsing, monitor protocol, parsers
 go build -o quickemu-tui .
 ```
 
+`make dist` (optionally `GOOS=darwin GOARCH=arm64 BUILD=7`) builds a zip like
+`dist/quickemu-tui-0.1.7-macos-arm64.zip`. CI (`.github/workflows/build.yml`)
+does this for Linux and macOS on amd64 and arm64, and each push to `master`
+publishes a release: the version is `VERSION` (major.minor, bump by hand) plus
+the CI run number. `quickemu-tui -version` prints it.
+
 Run it from anywhere:
 
 ```bash
