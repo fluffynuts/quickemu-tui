@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,5 +189,93 @@ func TestInstallThatExitsZeroButReportsProblemsIsFlagged(t *testing.T) {
 	}
 	if m.mode != modeError || !m.flashErr || strings.Contains(m.flash, "installed ✓") {
 		t.Fatalf("mode=%v flash=%q", m.mode, m.flash)
+	}
+}
+
+func TestCatalogUsesCacheThenFreshAndSurvivesFailure(t *testing.T) {
+	cached, _ := qemu.ParseCatalog([]byte("Display Name,OS,Release,Option\nOld,old,1,\n"))
+	fresh, _ := qemu.ParseCatalog([]byte(testCSV))
+
+	m := New(Options{Root: t.TempDir()})
+	m.width, m.height = 100, 40
+	if !m.catalogLoading || len(m.catalog) != 0 {
+		t.Fatal("expected to start loading with no catalog")
+	}
+
+	// 1. the cache lands first: usable immediately, still refreshing
+	next, _ := m.Update(catalogMsg{catalog: cached, cached: true})
+	m = next.(Model)
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if m.mode != modeInstallPick || len(m.instItems()) != 1 || m.instItems()[0].value != "old" {
+		t.Fatalf("cached list not offered: mode=%v items=%+v", m.mode, m.instItems())
+	}
+
+	// 2. the fresh list replaces it while the picker is open
+	next, _ = m.Update(catalogMsg{catalog: fresh})
+	m = next.(Model)
+	if m.catalogLoading || len(m.instItems()) != 3 {
+		t.Fatalf("fresh list not applied: loading=%v items=%d", m.catalogLoading, len(m.instItems()))
+	}
+
+	// 3. a later failed refresh is silent when there is a list to use
+	m.catalogLoading = true
+	next, _ = m.Update(catalogMsg{err: errors.New("network down")})
+	m = next.(Model)
+	if m.mode != modeInstallPick || len(m.catalog) == 0 || m.catalogErr == nil {
+		t.Fatalf("stale list should survive a failed refresh: mode=%v err=%v", m.mode, m.catalogErr)
+	}
+}
+
+func TestPickerWaitsForCatalogAndReportsFailureOnlyIfNothingToShow(t *testing.T) {
+	m := New(Options{Root: t.TempDir()}) // still loading, nothing cached
+	m.width, m.height = 100, 40
+	m, cmd := keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if m.mode != modeInstallPick || cmd != nil {
+		t.Fatalf("should wait on the startup fetch, not start another: mode=%v cmd=%v", m.mode, cmd != nil)
+	}
+	if v := m.viewInstallPick(); !strings.Contains(v, "asking quickget") {
+		t.Errorf("no waiting message:\n%s", v)
+	}
+	// enter while waiting must not crash or advance
+	m, _ = keyOf(m, enter)
+	if m.instStep != stepOS {
+		t.Errorf("advanced with no catalog: %v", m.instStep)
+	}
+	next, _ := m.Update(catalogMsg{err: errors.New("boom")})
+	m = next.(Model)
+	if m.mode != modeError || !strings.Contains(m.errBody, "boom") {
+		t.Fatalf("waiting user not told: mode=%v", m.mode)
+	}
+
+	// pressing n again retries, since the last attempt failed
+	m.mode = modeNormal
+	m, cmd = keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if cmd == nil || !m.catalogLoading {
+		t.Error("expected a retry after a failure")
+	}
+}
+
+func TestStartupFetchPopulatesCacheAndModel(t *testing.T) {
+	dir := t.TempDir()
+	writeScript(t, dir, "quickget", "cat <<'EOF'\n"+testCSV+"EOF\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cache := filepath.Join(t.TempDir(), "catalog.csv")
+
+	m := New(Options{Root: t.TempDir(), CachePath: cache})
+	msg := fetchCatalogCmd("", cache)()
+	next, _ := m.Update(msg)
+	m = next.(Model)
+	if m.catalogLoading || len(m.catalog.OSes()) != 3 {
+		t.Fatalf("loading=%v OSes=%d", m.catalogLoading, len(m.catalog.OSes()))
+	}
+	if c, err := qemu.ReadCatalogCache(cache); err != nil || len(c.OSes()) != 3 {
+		t.Fatalf("cache not written: %v", err)
+	}
+
+	// next launch: the cache alone makes the list available before quickget answers
+	m2 := New(Options{Root: t.TempDir(), CachePath: cache})
+	next, _ = m2.Update(readCatalogCacheCmd(cache)())
+	if got := len(next.(Model).catalog.OSes()); got != 3 {
+		t.Fatalf("cache not used: %d OSes", got)
 	}
 }

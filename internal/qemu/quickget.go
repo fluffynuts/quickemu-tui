@@ -48,18 +48,57 @@ func FindQuickget(quickemuOverride string) (string, error) {
 	return exec.LookPath("quickget")
 }
 
-// LoadCatalog asks quickget what it can install. quickget's stderr is noisy
-// (stray jq errors) and is deliberately discarded.
-func LoadCatalog(quickget string) (Catalog, error) {
+// FetchCatalog asks quickget what it can install, returning the parsed list and
+// the raw CSV (for caching). quickget's stderr is noisy (stray jq errors) and
+// is deliberately discarded. This can take many seconds.
+func FetchCatalog(quickget string) (Catalog, []byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, quickget, "--list-csv")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("quickget --list-csv: %w", err)
+		return nil, nil, fmt.Errorf("quickget --list-csv: %w", err)
 	}
-	return ParseCatalog(out.Bytes())
+	cat, err := ParseCatalog(out.Bytes())
+	return cat, out.Bytes(), err
+}
+
+// ReadCatalogCache loads a catalog saved by WriteCatalogCache. A missing file
+// is an error the caller can ignore: the cache is only an accelerator.
+func ReadCatalogCache(path string) (Catalog, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	cat, err := ParseCatalog(data)
+	if err == nil && len(cat) == 0 {
+		err = errors.New("empty catalog cache")
+	}
+	return cat, err
+}
+
+// WriteCatalogCache saves quickget's CSV, replacing the old file atomically so
+// a crash can't leave a truncated cache.
+func WriteCatalogCache(path string, csv []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".catalog-*")
+	if err != nil {
+		return err
+	}
+	_, werr := tmp.Write(csv)
+	cerr := tmp.Close()
+	if werr != nil || cerr != nil {
+		os.Remove(tmp.Name())
+		return errors.Join(werr, cerr)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return nil
 }
 
 // ParseCatalog decodes `quickget --list-csv` output.

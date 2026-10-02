@@ -42,9 +42,62 @@ type installState struct {
 	finished             chan struct{} // closed once quickget has exited
 }
 
+// catalogMsg delivers the installable-systems list: either the quick read of the
+// on-disk cache (cached) or the result of asking quickget.
 type catalogMsg struct {
 	catalog qemu.Catalog
 	err     error
+	cached  bool
+}
+
+// readCatalogCacheCmd loads the cached list, if there is one.
+func readCatalogCacheCmd(path string) tea.Cmd {
+	if path == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		c, err := qemu.ReadCatalogCache(path)
+		return catalogMsg{catalog: c, err: err, cached: true}
+	}
+}
+
+// fetchCatalogCmd asks quickget for the list (slow) and refreshes the cache.
+func fetchCatalogCmd(quickemuOverride, cachePath string) tea.Cmd {
+	return func() tea.Msg {
+		q, err := qemu.FindQuickget(quickemuOverride)
+		if err != nil {
+			return catalogMsg{err: errors.New("quickget not found on PATH (it ships with quickemu)")}
+		}
+		c, raw, err := qemu.FetchCatalog(q)
+		if err == nil && cachePath != "" {
+			_ = qemu.WriteCatalogCache(cachePath, raw) // best effort
+		}
+		return catalogMsg{catalog: c, err: err}
+	}
+}
+
+// onCatalog handles either kind of catalogMsg.
+func (m Model) onCatalog(msg catalogMsg) (tea.Model, tea.Cmd) {
+	if msg.cached {
+		// an old list is better than none; a fresher one replaces it when it arrives
+		if msg.err == nil && len(m.catalog) == 0 {
+			m.catalog = msg.catalog
+		}
+		return m, nil
+	}
+	m.catalogLoading = false
+	m.catalogErr = msg.err
+	if msg.err == nil {
+		m.catalog = msg.catalog
+		return m, nil
+	}
+	// A failed refresh is silent while we have some list to offer. Only
+	// someone waiting on the picker with nothing to show needs to hear.
+	if len(m.catalog) == 0 && m.mode == modeInstallPick {
+		m.mode = modeNormal
+		m.showError("Couldn't list installable systems", msg.err.Error())
+	}
+	return m, nil
 }
 
 type installProgressMsg qemu.InstallProgress
@@ -77,20 +130,15 @@ func (m *Model) openInstall() tea.Cmd {
 	m.instStep = stepOS
 	m.instFilter, m.instCursor = "", 0
 	m.instOS, m.instRelease = "", ""
-	if len(m.catalog) > 0 || m.catalogLoading {
+	switch {
+	case m.catalogLoading:
+		return nil // the startup fetch is still running; the picker shows a wait message until it lands
+	case len(m.catalog) > 0 && m.catalogErr == nil:
 		return nil
 	}
-	q, err := qemu.FindQuickget(m.opts.Quickemu)
-	if err != nil {
-		m.mode = modeNormal
-		m.setFlash("quickget not found on PATH (it ships with quickemu)", true)
-		return nil
-	}
+	// nothing usable yet, or the last refresh failed: try again now
 	m.catalogLoading = true
-	return func() tea.Msg {
-		c, err := qemu.LoadCatalog(q)
-		return catalogMsg{catalog: c, err: err}
-	}
+	return fetchCatalogCmd(m.opts.Quickemu, m.opts.CachePath)
 }
 
 func (m Model) instItems() []pickItem {
@@ -156,7 +204,7 @@ func (m Model) handleInstallPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.instCursor = 0
 		}
 	case "enter":
-		if len(items) == 0 || m.catalogLoading {
+		if len(items) == 0 {
 			return m, nil
 		}
 		return m.pickItem(items[clamp(m.instCursor, 0, len(items)-1)])
@@ -366,8 +414,8 @@ func (m Model) viewInstallPick() string {
 		title += " – choose " + installStepTitles[m.instStep]
 	}
 	lines := []string{titleStyle.Render(title), ""}
-	if m.catalogLoading {
-		return strings.Join(append(lines, dimStyle.Render("asking quickget what it can install…")), "\n")
+	if len(m.catalog) == 0 {
+		return strings.Join(append(lines, dimStyle.Render("asking quickget what it can install (this can take a while)…")), "\n")
 	}
 	lines = append(lines, "filter: "+m.instFilter+dimStyle.Render("▏"), "")
 	items := m.instItems()

@@ -49,7 +49,12 @@ The keys below are shortcuts that work **inside the actions menu only**: pressin
 ## Installing a new VM
 
 Press `n`. The list of what can be installed comes from `quickget --list-csv`
-(so it always matches your installed quickemu): pick an OS (type to filter),
+(so it always matches your installed quickemu). That command can take several
+seconds, so it runs in the background at startup and the result is cached in
+`~/.cache/quickemu-tui/catalog.csv`: the cached list is available immediately
+on the next launch while a fresh one is fetched. If you press `n` before any
+list exists, the picker waits for the fetch; if the fetch fails you'll be told
+(and `n` retries), but a failed refresh with a cached list is silent. Pick an OS (type to filter),
 a release, and an edition if there is one, then confirm. `quickget` runs in
 your VM directory and the new VM appears in the list when it finishes.
 

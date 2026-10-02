@@ -147,3 +147,45 @@ func TestOutputLooksFailed(t *testing.T) {
 		t.Error("ERROR! line not detected")
 	}
 }
+
+func TestCatalogCacheRoundTripAndBadCache(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "sub", "catalog.csv")
+	if _, err := ReadCatalogCache(p); err == nil {
+		t.Error("missing cache should be an error")
+	}
+	if err := WriteCatalogCache(p, []byte(sampleCSV)); err != nil {
+		t.Fatal(err)
+	}
+	c, err := ReadCatalogCache(p)
+	if err != nil || len(c.OSes()) != 4 {
+		t.Fatalf("got %d OSes, err %v", len(c.OSes()), err)
+	}
+	// overwriting leaves no temp files behind
+	if err := WriteCatalogCache(p, []byte(sampleCSV)); err != nil {
+		t.Fatal(err)
+	}
+	if ents, _ := os.ReadDir(filepath.Dir(p)); len(ents) != 1 {
+		t.Errorf("stray files in cache dir: %v", ents)
+	}
+	if err := os.WriteFile(p, []byte("garbage"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadCatalogCache(p); err == nil {
+		t.Error("corrupt cache should be an error")
+	}
+}
+
+func TestFetchCatalogUsesQuickgetListCsv(t *testing.T) {
+	q := fakeQuickget(t, `[ "$1" = "--list-csv" ] || exit 9
+echo "jq: parse error: noise" >&2
+cat <<'EOF'
+`+sampleCSV+`EOF
+`)
+	c, raw, err := FetchCatalog(q)
+	if err != nil || len(c.OSes()) != 4 || !strings.HasPrefix(string(raw), "Display Name,") {
+		t.Fatalf("catalog=%d raw=%q err=%v", len(c.OSes()), raw, err)
+	}
+	if _, _, err := FetchCatalog(fakeQuickget(t, "exit 1\n")); err == nil {
+		t.Error("expected an error when quickget fails")
+	}
+}

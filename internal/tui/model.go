@@ -55,6 +55,7 @@ const (
 type Options struct {
 	Root       string   // directory holding quickemu *.conf files
 	Quickemu   string   // explicit quickemu path; empty means look it up on PATH
+	CachePath  string   // where the installable-systems list is cached; empty disables caching
 	ConfigPath string   // user config file; empty if there is nowhere to save settings
 	Defaults   []string // default .conf lines, merged into VMs (see qemu.MergeDefaults)
 }
@@ -124,6 +125,7 @@ type Model struct {
 
 	catalog        qemu.Catalog
 	catalogLoading bool
+	catalogErr     error // the last quickget fetch failed with this
 	instStep       installStep
 	instFilter     string
 	instCursor     int
@@ -206,13 +208,15 @@ func New(opts Options) Model {
 		defInput:     newDefaultsInput(),
 		pollInFlight: true, // Init issues the first poll
 	}
+	m.catalogLoading = true // Init starts the fetch
 	m.rediscover()
 	return m
 }
 
 // Init starts polling.
 func (m Model) Init() tea.Cmd {
-	return batch(tick(), gatherCmd(m.vms), m.loadSelectedDisk())
+	return batch(tick(), gatherCmd(m.vms), m.loadSelectedDisk(),
+		readCatalogCacheCmd(m.opts.CachePath), fetchCatalogCmd(m.opts.Quickemu, m.opts.CachePath))
 }
 
 // --- commands ---------------------------------------------------------------
@@ -497,16 +501,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, batch(tick(), m.pollNow())
 
 	case catalogMsg:
-		m.catalogLoading = false
-		if msg.err != nil {
-			if m.mode == modeInstallPick {
-				m.mode = modeNormal
-			}
-			m.showError("Couldn't list installable systems", msg.err.Error())
-			return m, nil
-		}
-		m.catalog = msg.catalog
-		return m, nil
+		return m.onCatalog(msg)
 
 	case installProgressMsg:
 		return m.onInstallProgress(msg)

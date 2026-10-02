@@ -83,6 +83,10 @@ func main() {
 		}
 	}
 
+	if dir, err := os.UserCacheDir(); err == nil {
+		opts.CachePath = filepath.Join(dir, "quickemu-tui", "catalog.csv")
+	}
+
 	program := tea.NewProgram(tui.New(opts), tea.WithAltScreen())
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "quickemu-tui:", err)
