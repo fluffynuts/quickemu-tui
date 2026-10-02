@@ -178,6 +178,7 @@ type opDoneMsg struct {
 	refreshDisk  bool
 	refreshMedia bool
 	startAfter   bool
+	forgetVM     bool // the VM was deleted: drop what we know about it and rescan
 }
 
 // --- construction -----------------------------------------------------------
@@ -357,8 +358,9 @@ func (m *Model) rediscover() {
 	if vm, ok := m.selected(); ok {
 		current = vm.ConfPath
 	}
+	previous := m.cursor
 	m.vms = vms
-	m.cursor = 0
+	m.cursor = clamp(previous, 0, len(vms)-1) // if the selected VM is gone, stay near it
 	for i, vm := range vms {
 		if vm.ConfPath == current {
 			m.cursor = i
@@ -540,7 +542,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setFlash(msg.label+" ✓", false)
 		}
+		if msg.forgetVM && msg.err == nil {
+			delete(m.infos, msg.conf)
+			delete(m.disks, msg.conf)
+			m.snapCursor = 0
+			m.rediscover()
+		}
 		cmds := []tea.Cmd{m.pollNow()}
+		if msg.forgetVM && msg.err == nil {
+			cmds = append(cmds, m.loadSelectedDisk())
+		}
 		if vm, ok := m.vmByConf(msg.conf); ok {
 			if msg.refreshDisk {
 				cmds = append(cmds, loadDisk(vm))
@@ -695,7 +706,7 @@ func (m Model) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
 }
 
 var mutatingKeys = map[string]bool{
-	"s": true, "p": true, "K": true, "c": true, "a": true, "A": true, "d": true, "e": true,
+	"s": true, "p": true, "K": true, "c": true, "a": true, "A": true, "d": true, "e": true, "D": true,
 }
 
 func (m Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
@@ -862,6 +873,23 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 				return qemu.CreateSnapshot(vm, tag)
 			})
 		})
+
+	case "D":
+		if up {
+			m.setFlash("Shut "+vm.Name()+" down first: a running VM can't be deleted", true)
+			return m, nil
+		}
+		plan, err := qemu.PlanDelete(vm)
+		if err != nil {
+			m.setFlash("Can't delete "+vm.Name()+": "+firstLine(err.Error()), true)
+			return m, nil
+		}
+		m.askConfirm(deleteVMPrompt(vm, plan), func(m *Model) tea.Cmd {
+			return m.startOp("Delete "+vm.Name(), vm, opDoneMsg{forgetVM: true}, func() error {
+				return qemu.DeleteVM(vm, plan)
+			})
+		})
+		return m, nil
 
 	case "d":
 		if up {

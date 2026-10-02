@@ -34,7 +34,7 @@ const fullHelp = `  d  default VM options (e.g. gl="off"): added to new VMs, and
   ↑/k ↓/j  move          tab    switch VM list / snapshot list      r  refresh
   enter    open the actions menu for the selected VM. Inside it, press an item's key
            (s start, p shutdown, K force stop, c create, a/A revert, d delete snapshots, m media, e edit,
-           l logs, x ssh, o open folder) or move to it and press enter.
+           l logs, x ssh, o open folder, D delete VM) or move to it and press enter.
   ?  toggle help         q      quit (VMs keep running)`
 
 // View renders the UI.

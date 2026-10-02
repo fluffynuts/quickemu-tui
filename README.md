@@ -44,6 +44,7 @@ The keys below are shortcuts that work **inside the actions menu only**: pressin
 | l | logs: quickemu's log, the launch output, the generated launch script |
 | x | ssh in via the forwarded port |
 | o | open the VM folder |
+| D | delete the VM: its `.conf` and its folder, after a confirmation that lists exactly what goes (not while it runs) |
 
 ## Installing a new VM
 
@@ -59,6 +60,16 @@ are kept, so installing the same thing again resumes it. Quitting during an
 install asks first. If `quickget` exits 0 but printed errors (it does this
 after a failed unzip), the install is reported as having problems rather than
 as a success.
+
+## Deleting a VM
+
+`D` in the actions menu removes the `.conf`, the VM's folder (where its disk
+lives, with everything in it) and the desktop shortcut quickemu may have made,
+after a confirmation listing each path and the folder's size. It is never done
+to a running VM. The folder is only removed if it is a real directory inside
+your VM directory that no other VM uses: if a VM's disk sits directly in the VM
+directory, outside it, behind a symlink, or is shared, only the `.conf` is
+removed and the confirmation says what was left and why.
 
 ## Default VM options
 
