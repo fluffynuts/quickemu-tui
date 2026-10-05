@@ -38,6 +38,7 @@ const (
 	modeLogs
 	modeMenu
 	modeSnapDelete
+	modeSnapRevert
 	modeError
 	modeInstallPick
 	modeInstallProgress
@@ -118,6 +119,9 @@ type Model struct {
 	delVM     qemu.VM
 	delCursor int
 	delPicked map[string]bool // snapshot key -> ticked
+
+	revVM     qemu.VM
+	revCursor int
 
 	defaults []string
 	defInput textarea.Model
@@ -614,6 +618,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleMenuKey(msg.String())
 		case modeSnapDelete:
 			return m.handleSnapDeleteKey(msg.String())
+		case modeSnapRevert:
+			return m.handleSnapRevertKey(msg.String())
 		case modeError:
 			return m.handleErrorKey(msg)
 		case modeInstallPick:
@@ -701,7 +707,7 @@ func (m Model) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
 }
 
 var mutatingKeys = map[string]bool{
-	"s": true, "p": true, "K": true, "c": true, "a": true, "A": true, "d": true, "e": true, "D": true,
+	"s": true, "p": true, "K": true, "c": true, "a": true, "d": true, "e": true, "D": true,
 }
 
 func (m Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
@@ -898,28 +904,16 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 		m.openSnapDelete(vm)
 		return m, nil
 
-	case "a", "A":
+	case "a":
 		if up {
 			m.setFlash(needsOff, true)
 			return m, nil
 		}
-		snaps := m.snapshots(vm)
-		if m.snapCursor >= len(snaps) {
-			m.setFlash("No snapshot selected (tab to the snapshot list)", true)
+		if len(m.snapshots(vm)) == 0 {
+			m.setFlash("No snapshots to revert to", true)
 			return m, nil
 		}
-		snap := snaps[m.snapCursor]
-		ref := snap.Ref()
-		startAfter := key == "A"
-		verb := "Revert"
-		if startAfter {
-			verb = "Revert and start"
-		}
-		m.askConfirm(fmt.Sprintf("%s %s from '%s'? The current disk state is discarded.", verb, vm.Name(), ref), func(m *Model) tea.Cmd {
-			return m.startOp("Revert to '"+ref+"'", vm, opDoneMsg{refreshDisk: true, startAfter: startAfter}, func() error {
-				return qemu.ApplySnapshot(vm, ref)
-			})
-		})
+		m.openSnapRevert(vm)
 		return m, nil
 	}
 	return m, nil

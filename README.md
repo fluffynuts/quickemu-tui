@@ -53,7 +53,7 @@ The keys below are shortcuts that work **inside the actions menu only**: pressin
 | key | action |
 | --- | --- |
 | s / p / K | start / ACPI shutdown / force stop (`quickemu --kill`, falls back to monitor `quit`) |
-| c / a / A / d | create snapshot / revert / revert then start / delete: `d` opens a checklist (space ticks, `a` ticks all, enter deletes the ticked ones after confirming) |
+| c / a / d | create snapshot / revert / delete: `a` opens a picker (enter reverts, `s` reverts then starts, both after confirming); `d` opens a checklist (space ticks, `a` ticks all, enter deletes the ticked ones after confirming) |
 | m | removable media: swap or eject ISOs on a running VM |
 | e | edit the `.conf` in `$VISUAL`/`$EDITOR` (nano if unset) |
 | l | logs: quickemu's log, the launch output, the generated launch script |

@@ -114,6 +114,52 @@ func TestDeleteSnapshotsMultiSelect(t *testing.T) {
 	}
 }
 
+func TestRevertSnapshotPicker(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "vm.conf"), []byte(`guest="linux"`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New(Options{Root: root})
+	m.width, m.height = 100, 30
+	conf := m.vms[0].ConfPath
+	m.disks[conf] = diskState{loaded: true, info: qemu.DiskInfo{Snapshots: []qemu.Snapshot{
+		{ID: "1", Name: "pristine"}, {ID: "2", Name: "configured"},
+	}}}
+	key := func(m Model, k tea.KeyMsg) Model {
+		next, _ := m.Update(k)
+		return next.(Model)
+	}
+	run := func(m Model, s string) Model { return key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}) }
+
+	m.openMenu()
+	for _, it := range m.menuItems() {
+		if strings.Contains(it.label, "pristine") {
+			t.Fatalf("menu names a specific snapshot: %q", it.label)
+		}
+	}
+	m = run(m, "a")
+	if m.mode != modeSnapRevert {
+		t.Fatalf("mode = %v, want revert picker", m.mode)
+	}
+	if v := m.viewSnapRevert(); !strings.Contains(v, "pristine") || !strings.Contains(v, "configured") {
+		t.Fatalf("picker should list every snapshot:\n%s", v)
+	}
+	m = run(m, "j")
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.mode != modeConfirm || !strings.Contains(m.confirmText, "'configured'") || strings.Contains(m.confirmText, "and start") {
+		t.Fatalf("confirm wrong: mode=%v %q", m.mode, m.confirmText)
+	}
+	// declining returns to the picker; s asks to revert and start
+	m = run(m, "n")
+	if m.mode != modeSnapRevert {
+		t.Fatalf("after declining mode = %v, want revert picker", m.mode)
+	}
+	m = run(m, "s")
+	if m.mode != modeConfirm || !strings.Contains(m.confirmText, "Revert and start") || !strings.Contains(m.confirmText, "'configured'") {
+		t.Fatalf("confirm wrong: mode=%v %q", m.mode, m.confirmText)
+	}
+}
+
 func TestFailedOperationOpensScrollableErrorDialog(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "vm.conf"), []byte(`guest="linux"`+"\n"), 0o644); err != nil {

@@ -32,12 +32,7 @@ func (m Model) menuItems() []menuItem {
 	monitorUp := info.status.IsUp() && info.status.State != qemu.Busy
 	_, hasSSH := info.ports["ssh"]
 
-	snapRef := ""
-	snaps := m.snapshots(vm)
-	if m.snapCursor >= 0 && m.snapCursor < len(snaps) {
-		snapRef = " '" + snaps[m.snapCursor].Ref() + "'"
-	}
-	noSnap := len(snaps) == 0
+	noSnap := len(m.snapshots(vm)) == 0
 
 	return []menuItem{
 		{key: "s", label: "Start", disabled: up},
@@ -45,9 +40,8 @@ func (m Model) menuItems() []menuItem {
 		{key: "K", label: "Force stop", disabled: !up},
 
 		{key: "c", label: "Create snapshot", disabled: up, gap: true},
-		{key: "a", label: "Revert to snapshot" + snapRef, disabled: up || noSnap},
-		{key: "A", label: "Revert to snapshot" + snapRef + " and start", disabled: up || noSnap},
-		{key: "d", label: "Delete snapshots…", disabled: up || noSnap},
+		{key: "a", label: "Revert to snapshot…", disabled: up || noSnap},
+		{key: "d", label: "Delete snapshot…", disabled: up || noSnap},
 
 		{key: "m", label: "Removable media…", disabled: !monitorUp, gap: true},
 		{key: "e", label: "Edit .conf"},
