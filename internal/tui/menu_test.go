@@ -221,10 +221,12 @@ func TestDestructiveConfirmsDefaultToNo(t *testing.T) {
 
 func TestHeaderShowsVersionTopRight(t *testing.T) {
 	m := New(Options{Root: t.TempDir(), Version: "0.1.5"})
-	m.width, m.height = 100, 30
+	// the header holds the VM directory, whose temp path length varies by OS
+	// (macOS's is ~85 chars), so size the terminal around it
+	m.width, m.height = lipgloss.Width(m.viewHeader())+30, 30
 	first := strings.Split(m.View(), "\n")[0]
-	if !strings.HasSuffix(strings.TrimRight(ansi.Strip(first), " "), "v0.1.5") || lipgloss.Width(first) != 100 {
-		t.Fatalf("version not at the right edge of a 100-wide header: %q", ansi.Strip(first))
+	if !strings.HasSuffix(strings.TrimRight(ansi.Strip(first), " "), "v0.1.5") || lipgloss.Width(first) != m.width {
+		t.Fatalf("version not at the right edge of a %d-wide header: %q", m.width, ansi.Strip(first))
 	}
 	m.width = 20 // no room: the version is dropped rather than wrapping
 	if first := strings.Split(m.View(), "\n")[0]; strings.Contains(first, "v0.1.5") {
