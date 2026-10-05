@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/fluffynuts/quickemu-tui/internal/config"
 	"github.com/fluffynuts/quickemu-tui/internal/qemu"
@@ -16,8 +17,26 @@ func newDefaultsInput() textarea.Model {
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
 	ta.CharLimit = 0
-	ta.Placeholder = `gl="off"`
+	// a thin border so it reads as somewhere to type
+	border := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("8")).Padding(0, 1)
+	ta.FocusedStyle.Base = border
+	ta.BlurredStyle.Base = border
 	return ta
+}
+
+// defaultsHeader starts the editor when there are no defaults yet, so it's
+// clear the box is empty and the user can just type below it.
+const defaultsHeader = "# defaults applied to all machines"
+
+// countOptions is how many of lines set something (not blank or a comment).
+func countOptions(lines []string) int {
+	n := 0
+	for _, l := range lines {
+		if _, ok := qemu.DefaultKey(l); ok {
+			n++
+		}
+	}
+	return n
 }
 
 func (m *Model) openDefaults() tea.Cmd {
@@ -25,7 +44,11 @@ func (m *Model) openDefaults() tea.Cmd {
 	m.defErr = ""
 	m.defInput.SetWidth(max(30, min(70, m.width-12)))
 	m.defInput.SetHeight(max(4, min(10, m.height-18)))
-	m.defInput.SetValue(strings.Join(m.defaults, "\n"))
+	if len(m.defaults) == 0 {
+		m.defInput.SetValue(defaultsHeader + "\n")
+	} else {
+		m.defInput.SetValue(strings.Join(m.defaults, "\n"))
+	}
 	return m.defInput.Focus()
 }
 
@@ -68,10 +91,10 @@ func (m Model) saveDefaults() (tea.Model, tea.Cmd) {
 	m.defaults = lines
 	m.mode = modeNormal
 	m.defInput.Blur()
-	if len(lines) == 0 {
+	if n := countOptions(lines); n == 0 {
 		m.setFlash("Default VM options cleared", false)
 	} else {
-		m.setFlash(fmt.Sprintf("Saved %d default VM option(s)", len(lines)), false)
+		m.setFlash(fmt.Sprintf("Saved %d default VM option(s)", n), false)
 	}
 	return m, nil
 }

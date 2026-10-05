@@ -297,7 +297,7 @@ func (m Model) confirmInstall() (tea.Model, tea.Cmd) {
 	what := strings.TrimSpace(name + " " + m.instRelease + " " + edition)
 	target := tildify(m.opts.Root)
 	extra := ""
-	if n := len(m.defaults); n > 0 {
+	if n := countOptions(m.defaults); n > 0 {
 		extra = fmt.Sprintf("\n\nYour %d default option(s) will be added to its .conf.", n)
 	}
 	// back out of the picker only if confirmed; "no" returns to the picker

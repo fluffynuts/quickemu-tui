@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/fluffynuts/quickemu-tui/internal/config"
 )
@@ -42,18 +43,41 @@ func TestDefaultsDialogSavesAndKeepsOtherConfig(t *testing.T) {
 	if m.mode != modeNormal {
 		t.Fatalf("save should close the dialog; err=%q", m.defErr)
 	}
+	// the starter comment is kept, like any comment
 	c, err := config.Load(cfgPath)
-	if err != nil || c == nil || c.VMDir != "/vms" || len(c.DefaultConf) != 2 || c.DefaultConf[0] != `gl="off"` {
+	want := []string{defaultsHeader, `gl="off"`, `cpu_cores="4"`}
+	if err != nil || c == nil || c.VMDir != "/vms" || strings.Join(c.DefaultConf, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("saved config = %+v, %v", c, err)
 	}
-	if len(m.defaults) != 2 {
-		t.Errorf("model defaults not updated: %v", m.defaults)
+	if len(m.defaults) != 3 || m.flash != "Saved 2 default VM option(s)" {
+		t.Errorf("model defaults=%v flash=%q", m.defaults, m.flash)
 	}
 
-	// reopening shows what was saved
+	// reopening shows what was saved, comment included
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
-	if v := m.defInput.Value(); v != "gl=\"off\"\ncpu_cores=\"4\"" {
+	if v := m.defInput.Value(); v != defaultsHeader+"\ngl=\"off\"\ncpu_cores=\"4\"" {
 		t.Errorf("reopened with %q", v)
+	}
+}
+
+func TestDefaultsDialogStartsWithACommentAndABorderedBox(t *testing.T) {
+	m := New(Options{Root: t.TempDir(), ConfigPath: filepath.Join(t.TempDir(), "config.json")})
+	m.width, m.height = 100, 40
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if v := m.defInput.Value(); v != defaultsHeader+"\n" {
+		t.Fatalf("empty defaults opened with %q", v)
+	}
+	if m.defInput.Line() != 1 {
+		t.Errorf("cursor on line %d, want the empty line under the comment", m.defInput.Line())
+	}
+	v := ansi.Strip(m.viewDefaults())
+	if !strings.Contains(v, "┌") || !strings.Contains(v, "└") {
+		t.Errorf("no border around the edit area:\n%s", v)
+	}
+	// a comment alone is saved, but counts as no options
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	if m.mode != modeNormal || m.flash != "Default VM options cleared" || len(m.defaults) != 1 {
+		t.Fatalf("mode=%v flash=%q defaults=%v", m.mode, m.flash, m.defaults)
 	}
 }
 
