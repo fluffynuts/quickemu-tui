@@ -130,7 +130,7 @@ func TestInstallMergesDefaultsIntoNewConf(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := m.startInstall("Haiku", "haiku", "r1", "")
+	cmd := m.startInstall("Haiku", "haiku", "r1", "", nil)
 	for i := 0; i < 20 && m.install != nil; i++ {
 		next, c := m.Update(cmd())
 		m, cmd = next.(Model), c

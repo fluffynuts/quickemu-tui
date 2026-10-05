@@ -29,7 +29,18 @@ func newInstallModel(t *testing.T) Model {
 	m := New(Options{Root: t.TempDir()})
 	m.width, m.height = 100, 40
 	m.catalog = cat
+	fakeHost(t, 16, 32<<30)
 	return m
+}
+
+// fakeHost makes the CPU and memory steps see a machine with cpus logical
+// CPUs and ram bytes of memory.
+func fakeHost(t *testing.T, cpus int, ram int64) {
+	t.Helper()
+	oldCPUs, oldRAM := hostCPUs, hostRAM
+	hostCPUs = func() int { return cpus }
+	hostRAM = func() (int64, error) { return ram, nil }
+	t.Cleanup(func() { hostCPUs, hostRAM = oldCPUs, oldRAM })
 }
 
 func keyOf(m Model, k tea.KeyMsg) (Model, tea.Cmd) {
@@ -64,6 +75,11 @@ func TestInstallPickerWalksOSReleaseEdition(t *testing.T) {
 	}
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyDown})
 	m, _ = keyOf(m, enter) // French
+	if m.instStep != stepCPU || m.instEdition != "French" {
+		t.Fatalf("after the edition: step=%v edition=%q, want the CPU step", m.instStep, m.instEdition)
+	}
+	m, _ = keyOf(m, enter) // auto CPUs
+	m, _ = keyOf(m, enter) // auto memory
 	if m.mode != modeConfirm || m.confirmDefault != defaultYes || !strings.Contains(m.confirmText, "Windows 11 French") {
 		t.Fatalf("mode=%v confirm=%q", m.mode, m.confirmText)
 	}
@@ -98,7 +114,12 @@ func TestInstallShowsProgressAndFinishes(t *testing.T) {
 	m := newInstallModel(t)
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	m = typed(m, "haiku")
-	m, _ = keyOf(m, enter) // single release -> straight to the confirm
+	m, _ = keyOf(m, enter) // single release, no editions -> straight to CPUs
+	if m.instStep != stepCPU {
+		t.Fatalf("step=%v, want CPUs", m.instStep)
+	}
+	m, _ = keyOf(m, enter) // auto CPUs
+	m, _ = keyOf(m, enter) // auto memory
 	if m.mode != modeConfirm {
 		t.Fatalf("mode=%v, want confirm", m.mode)
 	}
@@ -145,7 +166,7 @@ func TestInstallFailureShowsErrorDialog(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	m := newInstallModel(t)
-	cmd := m.startInstall("Haiku", "haiku", "r1", "")
+	cmd := m.startInstall("Haiku", "haiku", "r1", "", nil)
 	for i := 0; i < 20 && m.install != nil; i++ {
 		next, c := m.Update(cmd())
 		m, cmd = next.(Model), c
@@ -162,7 +183,7 @@ func TestInstallCancel(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	m := newInstallModel(t)
-	cmd := m.startInstall("Haiku", "haiku", "r1", "")
+	cmd := m.startInstall("Haiku", "haiku", "r1", "", nil)
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 	for i := 0; i < 20 && m.install != nil; i++ {
@@ -182,7 +203,7 @@ func TestInstallThatExitsZeroButReportsProblemsIsFlagged(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	m := newInstallModel(t)
-	cmd := m.startInstall("Haiku", "haiku", "r1", "")
+	cmd := m.startInstall("Haiku", "haiku", "r1", "", nil)
 	for i := 0; i < 20 && m.install != nil; i++ {
 		next, c := m.Update(cmd())
 		m, cmd = next.(Model), c
@@ -293,7 +314,7 @@ printf 'guest_os="windows"\ndisk_img="%s/disk.qcow2"\niso="%s/Win.iso"\n' "$1-$2
 func runInstall(t *testing.T) Model {
 	t.Helper()
 	m := newInstallModel(t)
-	cmd := m.startInstall("Windows", "windows", "11", "")
+	cmd := m.startInstall("Windows", "windows", "11", "", nil)
 	for i := 0; i < 20 && m.install != nil; i++ {
 		next, c := m.Update(cmd())
 		m, cmd = next.(Model), c
@@ -343,5 +364,100 @@ func TestInstallWarnsWhenTheISOIsMissing(t *testing.T) {
 	if m.mode != modeError || !strings.Contains(m.errBody, "does not exist") ||
 		!strings.Contains(m.errBody, filepath.Join(m.opts.Root, "windows-11", "Win.iso")) {
 		t.Fatalf("mode=%v body=%q", m.mode, m.errBody)
+	}
+}
+
+func TestInstallCPUAndMemorySteps(t *testing.T) {
+	m := newInstallModel(t) // 16 CPUs, 32 GiB
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m = typed(m, "haiku")
+	m, _ = keyOf(m, enter)
+
+	cpus := m.instItems()
+	if len(cpus) != 16 || cpus[0].label != "auto" || !strings.Contains(cpus[0].hint, "8 cores") || cpus[1].label != "1 core" || cpus[15].label != "15 cores" {
+		t.Fatalf("CPU choices = %+v, want auto (8 cores) then 1..15", cpus)
+	}
+	v := m.viewInstallPick()
+	for _, want := range []string{"16–31", "8   ← this host", "This host has 16 logical CPUs"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("CPU step lacks %q:\n%s", want, v)
+		}
+	}
+	m = typed(m, "4") // no filter here: typing does nothing
+	if len(m.instItems()) != 16 {
+		t.Fatal("typing filtered the CPU list")
+	}
+	for i := 0; i < 4; i++ {
+		m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	m, _ = keyOf(m, enter)
+	if m.instCores != "4" || m.instStep != stepRAM {
+		t.Fatalf("cores=%q step=%v", m.instCores, m.instStep)
+	}
+
+	ram := m.instItems()
+	var labels []string
+	for _, it := range ram {
+		labels = append(labels, it.label)
+	}
+	if got := strings.Join(labels, ","); got != "auto,4G,8G,12G,16G" {
+		t.Fatalf("memory choices = %s", got)
+	}
+	if !strings.Contains(ram[0].hint, "8G") || !strings.Contains(m.viewInstallPick(), "← this host") {
+		t.Errorf("auto hint/table wrong: %q\n%s", ram[0].hint, m.viewInstallPick())
+	}
+	// esc goes back to CPUs, keeping nothing half-chosen
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.instStep != stepCPU {
+		t.Fatalf("esc from memory: step=%v", m.instStep)
+	}
+	m, _ = keyOf(m, enter) // auto CPUs this time
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyDown})
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyDown})
+	m, _ = keyOf(m, enter) // 8G
+	if m.mode != modeConfirm || !strings.Contains(m.confirmText, "CPUs: auto, memory: 8G") {
+		t.Fatalf("mode=%v confirm=%q", m.mode, m.confirmText)
+	}
+	if got := strings.Join(m.sizeChoices(), " "); got != `ram="8G"` {
+		t.Fatalf("choices = %s", got)
+	}
+}
+
+func TestInstallSizeStepsShowYourDefaults(t *testing.T) {
+	m := newInstallModel(t)
+	m.defaults = []string{`cpu_cores="6"`}
+	m.instStep = stepCPU
+	if h := m.cpuItems()[0].hint; h != `your default: cpu_cores="6"` {
+		t.Fatalf("auto hint = %q", h)
+	}
+	fakeHost(t, 1, 6<<30) // tiny host: nothing but auto
+	m.host = readHostInfo()
+	if len(m.cpuItems()) != 1 || len(m.ramItems()) != 1 {
+		t.Fatalf("cpu=%+v ram=%+v, want only auto", m.cpuItems(), m.ramItems())
+	}
+}
+
+func TestInstallWritesPickedSizeOverQuickgetsAndDefaults(t *testing.T) {
+	dir := t.TempDir()
+	// like quickget for ubuntu-server, which writes its own ram=
+	script := "#!/bin/sh\nprintf 'guest_os=\"linux\"\nram=\"4G\"\n' > \"$1-$2.conf\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "quickget"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	m := newInstallModel(t)
+	m.defaults = []string{`ram="2G"`, `cpu_cores="2"`, `gl="off"`}
+
+	cmd := m.startInstall("Haiku", "haiku", "r1", "", []string{`cpu_cores="6"`, `ram="12G"`})
+	for i := 0; i < 20 && m.install != nil; i++ {
+		next, c := m.Update(cmd())
+		m, cmd = next.(Model), c
+	}
+	data, err := os.ReadFile(filepath.Join(m.opts.Root, "haiku-r1.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "guest_os=\"linux\"\nram=\"12G\"\ncpu_cores=\"6\"\ngl=\"off\"\n"; got != want {
+		t.Fatalf(".conf =\n%s\nwant\n%s", got, want)
 	}
 }

@@ -245,6 +245,95 @@ func InstallArgs(os, release, edition string) []string {
 
 const outputTailLines = 40
 
+// Download retries: curl exit codes for a dropped or stalled connection, which
+// are worth resuming, rather than e.g. a 404 or a full disk.
+const (
+	retryableCurlCodes = "7|16|18|28|35|52|55|56|92"
+	retryNotice        = "quickemu-tui: download interrupted"
+)
+
+var (
+	downloadRetries    = 5
+	downloadRetryDelay = 5 // seconds; tests shorten it
+)
+
+// curlShim stands in for curl on quickget's PATH. quickget deletes a partial
+// ISO as soon as curl fails, and runs curl with --disable so ~/.curlrc can't
+// add retries. Its downloads all pass --continue-at -, so rerunning the same
+// command carries on from the end of the partial file. Other calls (page
+// scraping, redirect checks) go straight to the real curl.
+const curlShim = `#!/bin/sh
+# quickemu-tui: resume interrupted quickget downloads
+real=%s
+case " $* " in
+*" --continue-at "*) ;;
+*) exec "$real" "$@" ;;
+esac
+n=0
+while :; do
+	"$real" "$@"
+	rc=$?
+	case $rc in
+	0) exit 0 ;;
+	%s) ;;
+	*) exit $rc ;;
+	esac
+	n=$((n + 1))
+	if [ $n -gt %d ]; then
+		exit $rc
+	fi
+	echo "%s (curl exit $rc); resuming in %ds, retry $n of %d" >&2
+	sleep %d
+done
+`
+
+// writeCurlShim puts a curl wrapper in a new temp directory and returns it.
+// It fails (and quickget uses curl directly) if there's no curl to wrap.
+func writeCurlShim() (string, error) {
+	real, err := exec.LookPath("curl")
+	if err != nil {
+		return "", err
+	}
+	dir, err := os.MkdirTemp("", "quickemu-tui-curl-")
+	if err != nil {
+		return "", err
+	}
+	script := fmt.Sprintf(curlShim, shellQuote(real), retryableCurlCodes, downloadRetries, retryNotice, downloadRetryDelay, downloadRetries, downloadRetryDelay)
+	if err := os.WriteFile(filepath.Join(dir, "curl"), []byte(script), 0o755); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", err
+	}
+	return dir, nil
+}
+
+// shellQuote single-quotes s for sh.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// withPathFirst returns env with dir at the front of PATH.
+func withPathFirst(env []string, dir string) []string {
+	out := make([]string, 0, len(env)+1)
+	path := ""
+	for _, e := range env {
+		if strings.HasPrefix(e, "PATH=") {
+			path = strings.TrimPrefix(e, "PATH=")
+			continue
+		}
+		out = append(out, e)
+	}
+	if path != "" {
+		dir += string(filepath.ListSeparator) + path
+	}
+	return append(out, "PATH="+dir)
+}
+
+// indirection so Install's parameter named os doesn't shadow the package
+var (
+	environ   = os.Environ
+	removeAll = os.RemoveAll
+)
+
 // Install runs quickget in dir to download an OS and create its VM config,
 // reporting progress as it goes. Cancelling ctx stops quickget and the
 // downloader under it; a re-run resumes the download.
@@ -254,6 +343,10 @@ const outputTailLines = 40
 func Install(ctx context.Context, quickget, dir, os, release, edition string, progress func(InstallProgress)) (string, error) {
 	cmd := exec.CommandContext(ctx, quickget, InstallArgs(os, release, edition)...)
 	cmd.Dir = dir
+	if shimDir, err := writeCurlShim(); err == nil {
+		defer removeAll(shimDir)
+		cmd.Env = withPathFirst(environ(), shimDir)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // so we can stop curl too
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 	cmd.WaitDelay = 5 * time.Second
@@ -286,6 +379,13 @@ func Install(ctx context.Context, quickget, dir, os, release, edition string, pr
 			}
 			if barNoiseRe.MatchString(line) {
 				continue // curl's half-drawn bar, e.g. "##O=#  #"
+			}
+			if strings.HasPrefix(line, retryNotice) {
+				// the curl error just before it was dealt with; keeping it
+				// would make a resumed download look failed (OutputLooksFailed)
+				for len(tail) > 0 && strings.Contains(tail[len(tail)-1], "curl: (") {
+					tail = tail[:len(tail)-1]
+				}
 			}
 			tail = append(tail, line)
 			if len(tail) > outputTailLines {

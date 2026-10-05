@@ -20,6 +20,8 @@ const (
 	stepOS installStep = iota
 	stepRelease
 	stepEdition
+	stepCPU
+	stepRAM
 )
 
 // pickItem is one row in the install picker.
@@ -132,7 +134,9 @@ func (m *Model) openInstall() tea.Cmd {
 	m.mode = modeInstallPick
 	m.instStep = stepOS
 	m.instFilter, m.instCursor = "", 0
-	m.instOS, m.instRelease = "", ""
+	m.instOS, m.instRelease, m.instEdition = "", "", ""
+	m.instCores, m.instRAM = "", ""
+	m.host = readHostInfo()
 	switch {
 	case m.catalogLoading:
 		return nil // the startup fetch is still running; the picker shows a wait message until it lands
@@ -163,6 +167,10 @@ func (m Model) instItems() []pickItem {
 			}
 			items = append(items, pickItem{value: e, label: label})
 		}
+	case stepCPU:
+		return m.cpuItems() // short lists: no filtering
+	case stepRAM:
+		return m.ramItems()
 	}
 	if m.instFilter == "" {
 		return items
@@ -212,6 +220,9 @@ func (m Model) handleInstallPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.pickItem(items[clamp(m.instCursor, 0, len(items)-1)])
 	default:
+		if m.instStep == stepCPU || m.instStep == stepRAM {
+			return m, nil // nothing to filter
+		}
 		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
 			for _, r := range msg.Runes {
 				if unicode.IsPrint(r) {
@@ -230,7 +241,15 @@ func (m Model) handleInstallPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // stepBack is the step before the current one, skipping steps that had
 // nothing to choose.
 func (m Model) stepBack() installStep {
-	if m.instStep == stepEdition && len(m.catalog.Releases(m.instOS)) > 1 {
+	switch m.instStep {
+	case stepRAM:
+		return stepCPU
+	case stepCPU:
+		if len(m.catalog.Editions(m.instOS, m.instRelease)) > 0 {
+			return stepEdition
+		}
+	}
+	if m.instStep != stepRelease && len(m.catalog.Releases(m.instOS)) > 1 {
 		return stepRelease
 	}
 	return stepOS
@@ -250,7 +269,14 @@ func (m Model) pickItem(it pickItem) (tea.Model, tea.Cmd) {
 		m.instRelease = it.value
 		return m.afterRelease()
 	case stepEdition:
-		return m.confirmInstall(it.value)
+		m.instEdition = it.value
+		m.instStep = stepCPU
+	case stepCPU:
+		m.instCores = it.value
+		m.instStep = stepRAM
+	case stepRAM:
+		m.instRAM = it.value
+		return m.confirmInstall()
 	}
 	return m, nil
 }
@@ -260,10 +286,13 @@ func (m Model) afterRelease() (tea.Model, tea.Cmd) {
 		m.instStep = stepEdition
 		return m, nil
 	}
-	return m.confirmInstall("")
+	m.instEdition = ""
+	m.instStep = stepCPU
+	return m, nil
 }
 
-func (m Model) confirmInstall(edition string) (tea.Model, tea.Cmd) {
+func (m Model) confirmInstall() (tea.Model, tea.Cmd) {
+	edition := m.instEdition
 	name := m.catalog.DisplayName(m.instOS)
 	what := strings.TrimSpace(name + " " + m.instRelease + " " + edition)
 	target := tildify(m.opts.Root)
@@ -272,15 +301,19 @@ func (m Model) confirmInstall(edition string) (tea.Model, tea.Cmd) {
 		extra = fmt.Sprintf("\n\nYour %d default option(s) will be added to its .conf.", n)
 	}
 	// back out of the picker only if confirmed; "no" returns to the picker
-	m.askConfirm(fmt.Sprintf("Download %s and create a VM in %s?\n\nImages can be several GB. Progress is shown while it downloads,\nand a cancelled download can be resumed by installing it again.%s", what, target, extra), defaultYes, func(m *Model) tea.Cmd {
-		return m.startInstall(name, m.instOS, m.instRelease, edition)
+	choices := m.sizeChoices()
+	m.askConfirm(fmt.Sprintf("Download %s and create a VM in %s?\n\n%s\n\nImages can be several GB. Progress is shown while it downloads,\nand a cancelled download can be resumed by installing it again.%s", what, target, m.sizeSummary(), extra), defaultYes, func(m *Model) tea.Cmd {
+		return m.startInstall(name, m.instOS, m.instRelease, edition, choices)
 	})
 	return m, nil
 }
 
 // --- running the install ----------------------------------------------------
 
-func (m *Model) startInstall(displayName, os, release, edition string) tea.Cmd {
+// startInstall runs quickget, then writes choices (the CPU and memory picked,
+// which override anything quickget set) and the user's defaults (which don't)
+// into the new VM's .conf.
+func (m *Model) startInstall(displayName, os, release, edition string, choices []string) tea.Cmd {
 	q, err := qemu.FindQuickget(m.opts.Quickemu)
 	if err != nil {
 		m.mode = modeNormal
@@ -318,9 +351,14 @@ func (m *Model) startInstall(displayName, os, release, edition string) tea.Cmd {
 					continue
 				}
 				done.confs = append(done.confs, path)
+				if err := qemu.SetConfValues(path, choices); err != nil {
+					done.mergeErr = err
+				} else {
+					done.added = append(done.added, choices...)
+				}
 				added, mergeErr := qemu.ApplyDefaults(path, defaults)
 				done.added = append(done.added, added...)
-				if mergeErr != nil {
+				if mergeErr != nil && done.mergeErr == nil {
 					done.mergeErr = mergeErr
 				}
 				// quickget can "succeed" having saved a web page where the ISO
@@ -446,14 +484,18 @@ func isoReport(title string, problems []qemu.ISOProblem, confs []string) string 
 
 var installStepTitles = map[installStep]string{
 	stepOS: "operating system", stepRelease: "release", stepEdition: "edition",
+	stepCPU: "number of CPUs", stepRAM: "memory",
 }
 
 func (m Model) viewInstallPick() string {
 	title := "New VM: choose " + installStepTitles[m.instStep]
 	if m.instStep != stepOS {
 		title = "New VM: " + m.catalog.DisplayName(m.instOS)
-		if m.instStep == stepEdition {
+		if m.instStep >= stepEdition {
 			title += " " + m.instRelease
+		}
+		if m.instStep >= stepCPU && m.instEdition != "" {
+			title += " " + m.instEdition
 		}
 		title += " – choose " + installStepTitles[m.instStep]
 	}
@@ -461,7 +503,13 @@ func (m Model) viewInstallPick() string {
 	if len(m.catalog) == 0 {
 		return strings.Join(append(lines, dimStyle.Render("asking quickget what it can install (this can take a while)…")), "\n")
 	}
-	lines = append(lines, "filter: "+m.instFilter+dimStyle.Render("▏"), "")
+	sizing := m.instStep == stepCPU || m.instStep == stepRAM
+	if sizing {
+		lines = append(lines, m.viewSizeTable()...)
+		lines = append(lines, "")
+	} else {
+		lines = append(lines, "filter: "+m.instFilter+dimStyle.Render("▏"), "")
+	}
 	items := m.instItems()
 	if len(items) == 0 {
 		lines = append(lines, dimStyle.Render("nothing matches"))
@@ -484,8 +532,14 @@ func (m Model) viewInstallPick() string {
 		}
 		rows[i] = row
 	}
-	lines = append(lines, windowAround(rows, cursor, max(3, min(14, m.height-16)))...)
-	lines = append(lines, "", dimStyle.Render(fmt.Sprintf("%d shown • type to filter • enter select • esc back", len(items))))
+	listRows := max(3, min(14, m.height-16))
+	help := fmt.Sprintf("%d shown • type to filter • enter select • esc back", len(items))
+	if sizing {
+		listRows = max(3, min(10, m.height-26)) // the table takes room
+		help = "↑↓ select • enter next • esc back"
+	}
+	lines = append(lines, windowAround(rows, cursor, listRows)...)
+	lines = append(lines, "", dimStyle.Render(help))
 	return strings.Join(lines, "\n")
 }
 

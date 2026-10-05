@@ -137,6 +137,10 @@ type Model struct {
 	instCursor     int
 	instOS         string
 	instRelease    string
+	instEdition    string
+	instCores      string // "" for auto
+	instRAM        string // e.g. "8G"; "" for auto
+	host           hostInfo
 	install        *installState
 
 	errTitle  string

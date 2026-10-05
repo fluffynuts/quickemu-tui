@@ -71,13 +71,24 @@ seconds, so it runs in the background at startup and the result is cached in
 on the next launch while a fresh one is fetched. If you press `n` before any
 list exists, the picker waits for the fetch; if the fetch fails you'll be told
 (and `n` retries), but a failed refresh with a cached list is silent. Pick an OS (type to filter),
-a release, and an edition if there is one, then confirm. `quickget` runs in
+a release, and an edition if there is one. Then choose the number of CPUs
+(1 to one less than the host's logical CPUs) and the memory (4G steps up to
+about half the host's RAM), or leave either on `auto`, where quickemu sizes the
+VM from the host each time it starts (both steps show quickemu's table, with
+your host's row marked). A choice is written to the new `.conf` as
+`cpu_cores=`/`ram=`, overriding anything quickget wrote there and any default
+option for the same key. Then confirm. `quickget` runs in
 your VM directory and the new VM appears in the list when it finishes.
 
 A progress dialog shows a bar and percentage (parsed from curl's progress
 output). `esc` keeps the download running in the background, with its progress
 in the header, and `n` brings the dialog back. `c` cancels; partial downloads
-are kept, so installing the same thing again resumes it. Quitting during an
+are kept, so installing the same thing again resumes it. If the connection
+drops or stalls mid-download (e.g. curl's `HTTP/2 stream … was not closed
+cleanly`), quickemu-tui resumes it from where it stopped, up to 5 times, 5
+seconds apart, before letting it fail. quickget itself would delete the partial
+file and fail at once, so quickemu-tui puts a small curl wrapper first on
+quickget's `PATH` that reruns only its `--continue-at -` download calls. Quitting during an
 install asks first. If `quickget` exits 0 but printed errors (it does this
 after a failed unzip), the install is reported as having problems rather than
 as a success.

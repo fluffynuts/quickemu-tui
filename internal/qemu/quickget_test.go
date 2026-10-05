@@ -189,3 +189,93 @@ cat <<'EOF'
 		t.Error("expected an error when quickget fails")
 	}
 }
+
+// fakeCurl puts a "curl" on PATH that logs its arguments and runs body, and
+// shortens the retry delay. It returns the log file.
+func fakeCurl(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	script := "#!/bin/sh\necho \"$*\" >> '" + log + "'\n" + body
+	if err := os.WriteFile(filepath.Join(dir, "curl"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	old := downloadRetryDelay
+	downloadRetryDelay = 0
+	t.Cleanup(func() { downloadRetryDelay = old })
+	return log
+}
+
+// quickget's download call (web_get) and one of its page-scraping calls.
+const quickgetCurls = `curl --disable --silent --location https://example.com/page > /dev/null || exit 9
+if ! curl --disable --progress-bar --location --output "$1.iso" --continue-at - -- https://example.com/x.iso; then
+	echo "ERROR! Failed to download with curl."
+	rm -f "$1.iso"
+	exit 1
+fi
+echo ok > "$1-$2.conf"
+`
+
+func TestInstallResumesAnInterruptedDownload(t *testing.T) {
+	// fails with HTTP/2 stream error 92 twice, writing a chunk each time, then finishes
+	log := fakeCurl(t, `case "$*" in *--continue-at*) ;; *) exit 0 ;; esac
+out=$(echo "$*" | sed 's/.*--output \([^ ]*\).*/\1/')
+printf 'chunk' >> "$out"
+n=$(cat "$0.count" 2>/dev/null | wc -l)
+echo x >> "$0.count"
+[ "$n" -eq 0 ] && { printf '#### 36.3%%curl: (92) HTTP/2 stream 1 was not closed cleanly\n' >&2; exit 92; }
+[ "$n" -eq 1 ] && { echo "curl: (7) Failed to connect to example.com port 443" >&2; exit 7; }
+exit 0
+`)
+	dir := t.TempDir()
+	q := fakeQuickget(t, quickgetCurls)
+	var lines []string
+	out, err := Install(context.Background(), q, dir, "bazzite", "latest", "", func(p InstallProgress) {
+		if p.Line != "" {
+			lines = append(lines, p.Line)
+		}
+	})
+	if err != nil {
+		t.Fatalf("install failed: %v\n%s", err, out)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "bazzite.iso"))
+	if string(data) != "chunkchunkchunk" {
+		t.Fatalf("iso = %q, want three resumed chunks", data)
+	}
+	if qemuOut := out; OutputLooksFailed(qemuOut) || strings.Contains(qemuOut, "curl: (") {
+		t.Errorf("recovered curl errors kept in the output, so it looks failed:\n%s", qemuOut)
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "resuming in 0s, retry 2 of 5") {
+		t.Errorf("no retry notice in progress lines: %q", lines)
+	}
+	calls, _ := os.ReadFile(log)
+	if n := strings.Count(string(calls), "--continue-at"); n != 3 {
+		t.Errorf("download ran %d times, want 3:\n%s", n, calls)
+	}
+	if n := strings.Count(string(calls), "example.com/page"); n != 1 {
+		t.Errorf("non-download call ran %d times, want 1 (no retries)", n)
+	}
+}
+
+func TestInstallDoesNotRetryHardFailuresOrForever(t *testing.T) {
+	for _, tc := range []struct {
+		code string
+		runs int
+	}{
+		{"22", 1}, // HTTP error such as 404: retrying won't help
+		{"56", 6}, // connection reset every time: first try plus 5 retries
+	} {
+		log := fakeCurl(t, `case "$*" in *--continue-at*) exit `+tc.code+` ;; esac
+exit 0
+`)
+		q := fakeQuickget(t, quickgetCurls)
+		if _, err := Install(context.Background(), q, t.TempDir(), "x", "1", "", nil); err == nil {
+			t.Fatalf("exit %s: install succeeded", tc.code)
+		}
+		calls, _ := os.ReadFile(log)
+		if n := strings.Count(string(calls), "--continue-at"); n != tc.runs {
+			t.Errorf("exit %s: download ran %d times, want %d", tc.code, n, tc.runs)
+		}
+	}
+}
