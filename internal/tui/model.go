@@ -186,7 +186,8 @@ type opDoneMsg struct {
 	refreshDisk  bool
 	refreshMedia bool
 	startAfter   bool
-	forgetVM     bool // the VM was deleted: drop what we know about it and rescan
+	forgetVM     bool   // the VM was deleted: drop what we know about it and rescan
+	selectConf   string // the VM was renamed to this .conf: rescan and select it
 }
 
 // --- construction -----------------------------------------------------------
@@ -306,6 +307,14 @@ func (m Model) selected() (qemu.VM, bool) {
 		return qemu.VM{}, false
 	}
 	return m.vms[m.cursor], true
+}
+
+func (m *Model) selectByConf(conf string) {
+	for i, vm := range m.vms {
+		if vm.ConfPath == conf {
+			m.cursor = i
+		}
+	}
 }
 
 func (m Model) vmByConf(conf string) (qemu.VM, bool) {
@@ -553,14 +562,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setFlash(msg.label+" ✓", false)
 		}
-		if msg.forgetVM && msg.err == nil {
+		renamed := msg.selectConf != "" && msg.err == nil
+		if (msg.forgetVM || renamed) && msg.err == nil {
 			delete(m.infos, msg.conf)
 			delete(m.disks, msg.conf)
 			m.snapCursor = 0
 			m.rediscover()
 		}
+		if renamed {
+			m.selectByConf(msg.selectConf)
+		}
 		cmds := []tea.Cmd{m.pollNow()}
-		if msg.forgetVM && msg.err == nil {
+		if (msg.forgetVM || renamed) && msg.err == nil {
 			cmds = append(cmds, m.loadSelectedDisk())
 		}
 		if vm, ok := m.vmByConf(msg.conf); ok {
@@ -732,7 +745,7 @@ func (m *Model) declineConfirm() {
 }
 
 var mutatingKeys = map[string]bool{
-	"s": true, "p": true, "K": true, "c": true, "a": true, "d": true, "e": true, "D": true,
+	"s": true, "p": true, "K": true, "c": true, "a": true, "d": true, "e": true, "D": true, "R": true,
 }
 
 func (m Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
@@ -899,6 +912,13 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 				return qemu.CreateSnapshot(vm, tag)
 			})
 		})
+
+	case "R":
+		if up {
+			m.setFlash("Shut "+vm.Name()+" down first: a running VM can't be renamed", true)
+			return m, nil
+		}
+		return m, m.askRenameVM(vm)
 
 	case "D":
 		if up {

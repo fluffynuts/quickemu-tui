@@ -49,7 +49,8 @@ func (m Model) menuItems() []menuItem {
 		{key: "x", label: "SSH in", disabled: !hasSSH || !info.status.IsUp()},
 		{key: "o", label: "Open VM folder"},
 
-		{key: "D", label: "Delete VM…", disabled: up, gap: true},
+		{key: "R", label: "Rename VM…", disabled: up, gap: true},
+		{key: "D", label: "Delete VM…", disabled: up},
 	}
 }
 

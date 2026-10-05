@@ -59,6 +59,7 @@ The keys below are shortcuts that work **inside the actions menu only**: pressin
 | l | logs: quickemu's log, the launch output, the generated launch script |
 | x | ssh in via the forwarded port |
 | o | open the VM folder |
+| R | rename the VM: its `.conf`, its folder and the paths in the `.conf` that point into it (not while it runs) |
 | D | delete the VM: its `.conf` and its folder, after a confirmation that lists exactly what goes (not while it runs) |
 
 ## Installing a new VM
