@@ -64,7 +64,29 @@ func (m Model) viewHeader() string {
 		h += "  " + m.spin.View()
 	}
 	h += m.installHeader()
-	return h
+	return withRightText(h, m.versionLabel(), m.width)
+}
+
+// versionLabel is the header's version, e.g. "v0.1.5" ("dev" for local builds).
+func (m Model) versionLabel() string {
+	v := m.opts.Version
+	if v == "" || v == "dev" {
+		return v
+	}
+	return "v" + v
+}
+
+// withRightText pads line so text sits at its right edge, within width. The
+// text is dropped when the line is too long to leave room for it.
+func withRightText(line, text string, width int) string {
+	if text == "" {
+		return line
+	}
+	gap := width - lipgloss.Width(line) - lipgloss.Width(text)
+	if gap < 2 {
+		return line
+	}
+	return line + strings.Repeat(" ", gap) + dimStyle.Render(text)
 }
 
 func (m Model) viewFooter() string {
@@ -85,7 +107,10 @@ func (m Model) viewKeys() string {
 	case modePrompt:
 		keys = "enter confirm • esc cancel"
 	case modeConfirm:
-		keys = "y yes • n no"
+		keys = "y yes • n no • enter no"
+		if m.confirmDefault == defaultYes {
+			keys = "y yes • n no • enter yes"
+		}
 	case modeMedia:
 		keys = "↑↓ select • enter/c insert image • e eject • r refresh • esc close"
 	case modeDefaults:
@@ -241,7 +266,7 @@ func (m Model) viewModal() string {
 	case modePrompt:
 		return modalStyle.Render(titleStyle.Render(m.promptTitle) + "\n\n" + m.input.View())
 	case modeConfirm:
-		return modalStyle.Width(max(30, min(70, m.width-4))).Render(m.confirmText + "\n\n" + dimStyle.Render("y / n"))
+		return modalStyle.Width(max(30, min(70, m.width-4))).Render(m.confirmText + "\n\n" + dimStyle.Render(m.confirmChoices()))
 	case modeMedia:
 		return modalStyle.Render(m.viewMedia())
 	case modeSnapDelete:
@@ -260,6 +285,14 @@ func (m Model) viewModal() string {
 		return modalStyle.Padding(0, 1).Render(m.viewLogs())
 	}
 	return ""
+}
+
+// confirmChoices is the y/n hint, with the enter default capitalised.
+func (m Model) confirmChoices() string {
+	if m.confirmDefault == defaultYes {
+		return "Y/n"
+	}
+	return "y/N"
 }
 
 func (m Model) viewMedia() string {

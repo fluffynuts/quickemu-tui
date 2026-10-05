@@ -91,7 +91,7 @@ func (m Model) confirmSnapDelete(snaps []qemu.Snapshot) (tea.Model, tea.Cmd) {
 	}
 	text := fmt.Sprintf("Delete %s of %s?", plural(len(picked), "snapshot"), vm.Name())
 	text += "\n\n" + trunc(strings.Join(names, ", "), max(30, min(70, m.width-8)))
-	m.askConfirm(text, func(m *Model) tea.Cmd {
+	m.askConfirm(text, defaultNo, func(m *Model) tea.Cmd {
 		m.mode = modeNormal
 		label := "Delete " + plural(len(refs), "snapshot")
 		return m.startOp(label, vm, opDoneMsg{refreshDisk: true}, func() error {

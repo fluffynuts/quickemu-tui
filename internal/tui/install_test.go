@@ -64,7 +64,7 @@ func TestInstallPickerWalksOSReleaseEdition(t *testing.T) {
 	}
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyDown})
 	m, _ = keyOf(m, enter) // French
-	if m.mode != modeConfirm || !strings.Contains(m.confirmText, "Windows 11 French") {
+	if m.mode != modeConfirm || m.confirmDefault != defaultYes || !strings.Contains(m.confirmText, "Windows 11 French") {
 		t.Fatalf("mode=%v confirm=%q", m.mode, m.confirmText)
 	}
 }

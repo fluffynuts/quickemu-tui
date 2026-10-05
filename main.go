@@ -184,7 +184,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	opts := tui.Options{Root: root, Quickemu: *quickemu}
+	opts := tui.Options{Root: root, Quickemu: *quickemu, Version: version}
 	if path, err := config.Path(); err == nil {
 		opts.ConfigPath = path
 		if cfg, err := config.Load(path); err == nil && cfg != nil {

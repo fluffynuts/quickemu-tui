@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/fluffynuts/quickemu-tui/internal/qemu"
 )
@@ -157,6 +158,77 @@ func TestRevertSnapshotPicker(t *testing.T) {
 	m = run(m, "s")
 	if m.mode != modeConfirm || !strings.Contains(m.confirmText, "Revert and start") || !strings.Contains(m.confirmText, "'configured'") {
 		t.Fatalf("confirm wrong: mode=%v %q", m.mode, m.confirmText)
+	}
+}
+
+func TestConfirmEnterTakesTheDefault(t *testing.T) {
+	for _, tc := range []struct {
+		def      confirmDefault
+		hint     string
+		accepted bool
+	}{
+		{defaultNo, "y/N", false},
+		{defaultYes, "Y/n", true},
+	} {
+		m := New(Options{Root: t.TempDir()})
+		m.width, m.height = 100, 30
+		accepted := false
+		m.askConfirm("Sure?", tc.def, func(*Model) tea.Cmd { accepted = true; return nil })
+		if v := m.viewModal(); !strings.Contains(v, tc.hint) {
+			t.Errorf("%s: prompt lacks hint:\n%s", tc.hint, v)
+		}
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if accepted != tc.accepted || next.(Model).mode != modeNormal {
+			t.Errorf("%s: enter accepted=%v mode=%v, want accepted=%v and closed", tc.hint, accepted, next.(Model).mode, tc.accepted)
+		}
+	}
+}
+
+func TestDestructiveConfirmsDefaultToNo(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "vm.conf"), []byte(`guest="linux"`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New(Options{Root: root})
+	m.width, m.height = 100, 30
+	m.disks[m.vms[0].ConfPath] = diskState{loaded: true, info: qemu.DiskInfo{Snapshots: []qemu.Snapshot{{ID: "1", Name: "a"}}}}
+	key := func(m Model, k tea.KeyMsg) Model {
+		next, _ := m.Update(k)
+		return next.(Model)
+	}
+	run := func(m Model, s string) Model { return key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}) }
+
+	m.openMenu()
+	m = run(m, "a")
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.mode != modeConfirm || m.confirmDefault != defaultNo {
+		t.Fatalf("revert: mode=%v default=%v, want a y/N confirm", m.mode, m.confirmDefault)
+	}
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.mode != modeSnapRevert || m.busy != 0 {
+		t.Fatalf("enter should decline back to the picker: mode=%v busy=%d", m.mode, m.busy)
+	}
+
+	m.mode = modeNormal
+	m.openMenu()
+	m = run(m, "d")
+	m = key(m, tea.KeyMsg{Type: tea.KeySpace})
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.mode != modeConfirm || m.confirmDefault != defaultNo {
+		t.Fatalf("delete: mode=%v default=%v, want a y/N confirm", m.mode, m.confirmDefault)
+	}
+}
+
+func TestHeaderShowsVersionTopRight(t *testing.T) {
+	m := New(Options{Root: t.TempDir(), Version: "0.1.5"})
+	m.width, m.height = 100, 30
+	first := strings.Split(m.View(), "\n")[0]
+	if !strings.HasSuffix(strings.TrimRight(ansi.Strip(first), " "), "v0.1.5") || lipgloss.Width(first) != 100 {
+		t.Fatalf("version not at the right edge of a 100-wide header: %q", ansi.Strip(first))
+	}
+	m.width = 20 // no room: the version is dropped rather than wrapping
+	if first := strings.Split(m.View(), "\n")[0]; strings.Contains(first, "v0.1.5") {
+		t.Fatalf("version squeezed into a narrow header: %q", ansi.Strip(first))
 	}
 }
 

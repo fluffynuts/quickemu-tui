@@ -59,6 +59,7 @@ type Options struct {
 	CachePath  string   // where the installable-systems list is cached; empty disables caching
 	ConfigPath string   // user config file; empty if there is nowhere to save settings
 	Defaults   []string // default .conf lines, merged into VMs (see qemu.MergeDefaults)
+	Version    string   // shown in the header's top-right corner; empty hides it
 }
 
 // vmInfo is gathered off the UI thread on every poll, so View() never does IO.
@@ -107,8 +108,9 @@ type Model struct {
 	promptTitle string
 	onSubmit    func(m *Model, value string) tea.Cmd
 
-	confirmText string
-	onConfirm   func(m *Model) tea.Cmd
+	confirmText    string
+	confirmDefault confirmDefault
+	onConfirm      func(m *Model) tea.Cmd
 
 	mediaVM      qemu.VM
 	media        []qemu.BlockDevice
@@ -423,10 +425,20 @@ func (m *Model) askPrompt(title, initial string, onSubmit func(m *Model, value s
 	return m.input.Focus()
 }
 
-func (m *Model) askConfirm(text string, onYes func(m *Model) tea.Cmd) {
+// confirmDefault is what enter means in a y/n dialog: no for anything
+// destructive, so a stray enter can't lose data.
+type confirmDefault bool
+
+const (
+	defaultNo  confirmDefault = false
+	defaultYes confirmDefault = true
+)
+
+func (m *Model) askConfirm(text string, def confirmDefault, onYes func(m *Model) tea.Cmd) {
 	m.returnMode = m.mode
 	m.mode = modeConfirm
 	m.confirmText = text
+	m.confirmDefault = def
 	m.onConfirm = onYes
 }
 
@@ -650,14 +662,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) requestQuit() (tea.Model, tea.Cmd) {
 	if m.install != nil && m.mode != modeConfirm {
-		m.askConfirm("A VM install ("+m.install.title+") is still downloading. Quit and stop it?\nPartly downloaded files are kept so it can resume.", func(m *Model) tea.Cmd {
+		m.askConfirm("A VM install ("+m.install.title+") is still downloading. Quit and stop it?\nPartly downloaded files are kept so it can resume.", defaultNo, func(m *Model) tea.Cmd {
 			m.stopInstall()
 			return tea.Quit
 		})
 		return m, nil
 	}
 	if m.busy > 0 && m.mode != modeConfirm {
-		m.askConfirm("An operation is still running. Quit anyway?", func(*Model) tea.Cmd { return tea.Quit })
+		m.askConfirm("An operation is still running. Quit anyway?", defaultNo, func(*Model) tea.Cmd { return tea.Quit })
 		return m, nil
 	}
 	return m, tea.Quit
@@ -691,19 +703,32 @@ func (m Model) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "y", "Y":
-		m.mode = m.returnMode
-		fn := m.onConfirm
-		m.onConfirm = nil
-		if fn == nil {
-			return m, nil
+	case "enter":
+		if m.confirmDefault == defaultYes {
+			return m.acceptConfirm()
 		}
-		return m, fn(&m)
+		m.declineConfirm()
+	case "y", "Y":
+		return m.acceptConfirm()
 	case "n", "N", "esc", "q":
-		m.mode = m.returnMode
-		m.onConfirm = nil
+		m.declineConfirm()
 	}
 	return m, nil
+}
+
+func (m Model) acceptConfirm() (tea.Model, tea.Cmd) {
+	m.mode = m.returnMode
+	fn := m.onConfirm
+	m.onConfirm = nil
+	if fn == nil {
+		return m, nil
+	}
+	return m, fn(&m)
+}
+
+func (m *Model) declineConfirm() {
+	m.mode = m.returnMode
+	m.onConfirm = nil
 }
 
 var mutatingKeys = map[string]bool{
@@ -783,7 +808,7 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 			m.setFlash(vm.Name()+" isn't running", true)
 			return m, nil
 		}
-		m.askConfirm("Force-stop "+vm.Name()+"? That's pulling the power cord on the guest.", func(m *Model) tea.Cmd {
+		m.askConfirm("Force-stop "+vm.Name()+"? That's pulling the power cord on the guest.", defaultNo, func(m *Model) tea.Cmd {
 			q, err := qemu.FindQuickemu(m.opts.Quickemu)
 			if err != nil {
 				m.setFlash("quickemu not found on PATH (pass -quickemu)", true)
@@ -885,7 +910,7 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 			m.setFlash("Can't delete "+vm.Name()+": "+firstLine(err.Error()), true)
 			return m, nil
 		}
-		m.askConfirm(deleteVMPrompt(vm, plan), func(m *Model) tea.Cmd {
+		m.askConfirm(deleteVMPrompt(vm, plan), defaultNo, func(m *Model) tea.Cmd {
 			return m.startOp("Delete "+vm.Name(), vm, opDoneMsg{forgetVM: true}, func() error {
 				return qemu.DeleteVM(vm, plan)
 			})

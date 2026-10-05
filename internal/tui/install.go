@@ -272,7 +272,7 @@ func (m Model) confirmInstall(edition string) (tea.Model, tea.Cmd) {
 		extra = fmt.Sprintf("\n\nYour %d default option(s) will be added to its .conf.", n)
 	}
 	// back out of the picker only if confirmed; "no" returns to the picker
-	m.askConfirm(fmt.Sprintf("Download %s and create a VM in %s?\n\nImages can be several GB. Progress is shown while it downloads,\nand a cancelled download can be resumed by installing it again.%s", what, target, extra), func(m *Model) tea.Cmd {
+	m.askConfirm(fmt.Sprintf("Download %s and create a VM in %s?\n\nImages can be several GB. Progress is shown while it downloads,\nand a cancelled download can be resumed by installing it again.%s", what, target, extra), defaultYes, func(m *Model) tea.Cmd {
 		return m.startInstall(name, m.instOS, m.instRelease, edition)
 	})
 	return m, nil
@@ -357,7 +357,7 @@ func (m Model) handleInstallProgressKey(key string) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal // keeps running; n brings this back
 	case "c":
 		if m.install != nil {
-			m.askConfirm("Cancel the install of "+m.install.title+"?\nPartly downloaded files are kept so it can resume.", func(m *Model) tea.Cmd {
+			m.askConfirm("Cancel the install of "+m.install.title+"?\nPartly downloaded files are kept so it can resume.", defaultNo, func(m *Model) tea.Cmd {
 				if m.install != nil {
 					m.install.cancel()
 				}

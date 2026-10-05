@@ -50,7 +50,7 @@ func (m Model) confirmSnapRevert(snap qemu.Snapshot, startAfter bool) (tea.Model
 	if startAfter {
 		verb = "Revert and start"
 	}
-	m.askConfirm(fmt.Sprintf("%s %s from '%s'? The current disk state is discarded.", verb, vm.Name(), ref), func(m *Model) tea.Cmd {
+	m.askConfirm(fmt.Sprintf("%s %s from '%s'? The current disk state is discarded.", verb, vm.Name(), ref), defaultNo, func(m *Model) tea.Cmd {
 		m.mode = modeNormal
 		return m.startOp("Revert to '"+ref+"'", vm, opDoneMsg{refreshDisk: true, startAfter: startAfter}, func() error {
 			return qemu.ApplySnapshot(vm, ref)
