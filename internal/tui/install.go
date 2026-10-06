@@ -560,7 +560,7 @@ func (m Model) viewInstallProgress() string {
 	if st.percent >= 0 {
 		lines = append(lines, fmt.Sprintf("%s  %5.1f%%", progressBar(st.percent), st.percent))
 	} else {
-		lines = append(lines, "working… "+dimStyle.Render("(no percentage reported yet)"))
+		lines = append(lines, "working…")
 	}
 	line := st.line
 	if line == "" {
