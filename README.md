@@ -42,6 +42,7 @@ Run it from anywhere:
 ./quickemu-tui                 # defaults to ~/quickemu
 ./quickemu-tui ~/vms           # or -dir ~/vms
 ./quickemu-tui -quickemu /opt/quickemu/quickemu
+./quickemu-tui -no-mouse       # leave the mouse to the terminal
 ```
 
 Needs `quickemu` and `qemu-img` on `PATH`. `xdg-open` and `ssh` are only used
@@ -56,6 +57,17 @@ by their respective keys.
 | d | edit default VM options (see below) |
 | n | install a new VM with `quickget` (see below) |
 | enter | open the actions menu for the selected VM (↑↓ then enter runs one; esc closes) |
+
+The mouse works too: click a VM to select it, and click it again (or
+right-click it) for its actions menu, where clicking an item runs it and
+clicking outside closes it. Clicking a snapshot selects it, quick settings
+takes clicks on its choices and checkbox (clicking outside saves and closes),
+and the wheel scrolls whatever list is under it. Every dialog has a close
+button, `[x]` at the top right, which does what esc does there (the install
+picker closes rather than stepping back). Quick settings and the text prompts
+(snapshot tag, rename, SSH user, image path) also have a button, such as
+`[ Save ]`, that does what enter does. While the TUI has the mouse,
+most terminals still select text with shift held; `-no-mouse` turns it off.
 
 The keys below are shortcuts that work **inside the actions menu only**: pressing one is the same as choosing its item.
 

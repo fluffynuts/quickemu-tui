@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/fluffynuts/quickemu-tui/internal/qemu"
 )
@@ -35,6 +37,7 @@ const fullHelp = `  d  default VM options (e.g. gl="off"): added to new VMs, and
   enter    open the actions menu for the selected VM. Inside it, press an item's key
            (s start, p shutdown, K force stop, c create, a revert, d delete snapshots, m media,
            Q quick settings, e edit, l logs, x ssh, o open folder, R rename VM, D delete VM) or move to it and press enter.
+  mouse    click a VM to select it, click it again (or right-click) for its menu, click an item to run it, [x] closes a dialog
   ?  toggle help         q      quit (VMs keep running)`
 
 // View renders the UI.
@@ -44,18 +47,25 @@ func (m Model) View() string {
 	}
 	header := m.viewHeader()
 	footer := m.viewFooter()
-	bodyHeight := max(5, m.height-lipgloss.Height(header)-lipgloss.Height(footer))
+	_, bodyHeight := m.bodyArea()
 
 	var body string
 	switch m.mode {
 	case modeNormal:
 		body = m.viewMain(bodyHeight)
 	case modeMenu:
-		body = overlay(m.viewMain(bodyHeight), m.viewMenu(), m.width, bodyHeight)
+		body = overlay(m.viewMain(bodyHeight), m.dialogBox(), m.width, bodyHeight)
 	default:
-		body = lipgloss.Place(m.width, bodyHeight, lipgloss.Center, lipgloss.Center, m.viewModal())
+		body = lipgloss.Place(m.width, bodyHeight, lipgloss.Center, lipgloss.Center, m.dialogBox())
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+}
+
+// bodyArea is the screen row the body (between header and footer) starts on,
+// and its height.
+func (m Model) bodyArea() (top, height int) {
+	top = lipgloss.Height(m.viewHeader())
+	return top, max(5, m.height-top-lipgloss.Height(m.viewFooter()))
 }
 
 func (m Model) viewHeader() string {
@@ -140,11 +150,16 @@ func (m Model) viewKeys() string {
 }
 
 func (m Model) viewMain(h int) string {
-	listW := 40
-	if m.width < 90 {
-		listW = max(21, m.width*4/9)
-	}
+	listW := m.listWidth()
 	return lipgloss.JoinHorizontal(lipgloss.Top, m.viewVMList(listW, h), m.viewDetail(m.width-listW, h))
+}
+
+// listWidth is the VM list pane's width, borders included.
+func (m Model) listWidth() int {
+	if m.width < 90 {
+		return max(21, m.width*4/9)
+	}
+	return 40
 }
 
 func paneFor(active bool) lipgloss.Style {
@@ -184,11 +199,22 @@ func (m Model) viewDetail(w, h int) string {
 		return style.Render(dimStyle.Render("Select a VM"))
 	}
 
+	lines := m.detailHead(vm, inner)
+	lines = append(lines, "")
+	lines = append(lines, m.viewSnapshots(vm, inner, h-2-len(lines))...)
+	return style.Render(strings.Join(lines, "\n"))
+}
+
+// detailHead is the detail pane's lines above the snapshots: the VM's name and
+// state, then what its .conf says.
+func (m Model) detailHead(vm qemu.VM, inner int) []string {
 	info := m.infos[vm.ConfPath]
 	launching := m.launching[vm.ConfPath] && !info.status.IsUp()
 	stateText := info.status.State.String()
 	if launching {
 		stateText = "starting…"
+	} else if !info.status.Started.IsZero() {
+		stateText += dimStyle.Render("  up " + uptime(time.Since(info.status.Started)))
 	}
 	lines := []string{titleStyle.Render(trunc(vm.Name(), inner/2)) + "  " + stateDot(info.status, launching) + " " + stateText}
 	row := func(label, value string) {
@@ -205,6 +231,7 @@ func (m Model) viewDetail(w, h int) string {
 		row("disk", m.diskSummary(vm, info.paths.Disk))
 		row("cpu/ram", or(info.conf["cpu_cores"], "auto")+" cores, "+or(info.conf["ram"], "auto")+" RAM")
 		row("display", or(info.conf["display"], "default")+", gl "+or(info.conf["gl"], "default"))
+		row("on disk", m.footprintSummary(vm))
 		if port, ok := info.ports["ssh"]; ok && info.status.IsUp() {
 			row("ssh", fmt.Sprintf("localhost:%d (x to connect)", port))
 		}
@@ -212,10 +239,40 @@ func (m Model) viewDetail(w, h int) string {
 			lines = append(lines, warnStyle.Render(trunc(info.status.Detail, inner)))
 		}
 	}
+	return lines
+}
 
-	lines = append(lines, "")
-	lines = append(lines, m.viewSnapshots(vm, inner, h-2-len(lines))...)
-	return style.Render(strings.Join(lines, "\n"))
+// uptime is d to the minute, in its two largest units: "<1m", "5m",
+// "2h 13m", "3d 4h".
+func uptime(d time.Duration) string {
+	mins := int(d / time.Minute)
+	switch {
+	case mins < 1:
+		return "<1m"
+	case mins < 60:
+		return fmt.Sprintf("%dm", mins)
+	case mins < 24*60:
+		return fmt.Sprintf("%dh %dm", mins/60, mins%60)
+	}
+	return fmt.Sprintf("%dd %dh", mins/(24*60), mins/60%24)
+}
+
+// footprintSummary is the space all of vm's files take, e.g. "12.3 GiB in 14
+// files".
+func (m Model) footprintSummary(vm qemu.VM) string {
+	ds := m.disks[vm.ConfPath]
+	fp := ds.footprint
+	switch {
+	case !ds.loaded:
+		return "…"
+	case ds.footErr != nil && fp.Files == 0:
+		return "unknown (" + firstLine(ds.footErr.Error()) + ")"
+	}
+	s := fmt.Sprintf("%s in %s", qemu.HumanSize(fp.Bytes), plural(fp.Files, "file"))
+	if fp.Shared {
+		s += " (no folder of its own: the .conf, disk and logs)"
+	}
+	return s
 }
 
 func (m Model) diskSummary(vm qemu.VM, disk string) string {
@@ -263,10 +320,46 @@ func (m Model) viewSnapshots(vm qemu.VM, inner, rows int) []string {
 	return append(out, windowAround(items, m.snapCursor, rows-len(out))...)
 }
 
+// dialogBox is the open dialog (the menu or a modal) as View draws it, with
+// its close button.
+func (m Model) dialogBox() string {
+	if m.mode == modeMenu {
+		return withClose(m.viewMenu())
+	}
+	return withClose(m.viewModal())
+}
+
+// button draws a clickable button (see dialogButton).
+func button(label string) string {
+	return titleStyle.Render(buttonText(label))
+}
+
+func buttonText(label string) string {
+	return "[ " + label + " ]"
+}
+
+// closeButton sits in a dialog's top border, this far in from its right edge.
+const (
+	closeButton       = "[x]"
+	closeButtonOffset = 5 // "[x]─╮"
+)
+
+// withClose draws the close button into box's top border.
+func withClose(box string) string {
+	top, rest, _ := strings.Cut(box, "\n")
+	w := lipgloss.Width(top)
+	if w < closeButtonOffset+4 {
+		return box
+	}
+	top = ansi.Truncate(top, w-closeButtonOffset, "") + "\x1b[0m" + titleStyle.Render(closeButton) +
+		ansi.TruncateLeft(top, w-closeButtonOffset+lipgloss.Width(closeButton), "")
+	return top + "\n" + rest
+}
+
 func (m Model) viewModal() string {
 	switch m.mode {
 	case modePrompt:
-		return modalStyle.Render(titleStyle.Render(m.promptTitle) + "\n\n" + m.input.View())
+		return modalStyle.Render(titleStyle.Render(m.promptTitle) + "\n\n" + m.input.View() + "\n\n" + button(m.promptButton))
 	case modeConfirm:
 		return modalStyle.Width(max(30, min(70, m.width-4))).Render(m.confirmText + "\n\n" + dimStyle.Render(m.confirmChoices()))
 	case modeMedia:
@@ -358,14 +451,20 @@ func windowAround(lines []string, cursor, rows int) []string {
 	if rows <= 0 {
 		return nil
 	}
-	if len(lines) <= rows {
-		return lines
+	start := windowStart(len(lines), cursor, rows)
+	return lines[start:min(len(lines), start+rows)]
+}
+
+// windowStart is the index of the first of n lines that windowAround shows.
+func windowStart(n, cursor, rows int) int {
+	if n <= rows {
+		return 0
 	}
 	start := max(0, cursor-rows+1)
-	if start+rows > len(lines) {
-		start = len(lines) - rows
+	if start+rows > n {
+		start = n - rows
 	}
-	return lines[start : start+rows]
+	return start
 }
 
 // trunc shortens plain (unstyled) text to n runes.

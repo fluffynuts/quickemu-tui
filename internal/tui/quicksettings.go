@@ -216,35 +216,73 @@ func (m Model) saveQuickSettings() (tea.Model, tea.Cmd) {
 	return m, m.pollNow()
 }
 
+// qsButton is the label of the button that does what enter does.
+const qsButton = "Save"
+
+// qsHeadLines is how many lines of the dialog come before the groups.
+const qsHeadLines = 4
+
+// qsLayout is where the dialog's parts go, relative to its content's top left.
+type qsLayout struct {
+	cols     [qsGroups][]string // each group's rendered lines: title, then choices
+	at       [qsGroups]struct{ x, y int }
+	glY      int // the gl checkbox's line
+	listRows int // choices shown per group
+}
+
+// layout puts the groups side by side if they fit, else the first two side
+// by side above the display, else all stacked.
+func (m Model) qsLayout() qsLayout {
+	qs := m.qs
+	var l qsLayout
+	l.listRows = max(3, min(12, m.height-14))
+	var w, h [qsGroups]int
+	for g := range qsGroups {
+		l.cols[g] = qs.viewGroup(g, l.listRows)
+		w[g] = lipgloss.Width(strings.Join(l.cols[g], "\n"))
+		h[g] = len(l.cols[g])
+	}
+	const gap = 4
+	fits := func(width int) bool { return width <= m.width-8 }
+	switch {
+	case fits(w[0] + gap + w[1] + gap + w[2]):
+		l.at[1].x = w[0] + gap
+		l.at[2].x = w[0] + gap + w[1] + gap
+	case fits(w[0] + gap + w[1]):
+		l.at[1].x = w[0] + gap
+		l.at[2].y = max(h[0], h[1]) + 1
+	default:
+		l.at[1].y = h[0] + 1
+		l.at[2].y = h[0] + 1 + h[1] + 1
+	}
+	bottom := 0
+	for g := range qsGroups {
+		l.at[g].y += qsHeadLines
+		bottom = max(bottom, l.at[g].y+h[g])
+	}
+	l.glY = bottom + 1
+	return l
+}
+
 func (m Model) viewQuickSettings() string {
 	qs := m.qs
-	listRows := max(3, min(12, m.height-14))
-	cols := make([]string, qsGroups)
-	for g := range qsGroups {
-		cols[g] = strings.Join(qs.viewGroup(g, listRows), "\n")
-	}
-	// side by side if they fit, else the first two side by side above the
-	// display, else all stacked
-	gap := "    "
-	groups := lipgloss.JoinHorizontal(lipgloss.Top, cols[0], gap, cols[1], gap, cols[2])
-	if lipgloss.Width(groups) > m.width-8 {
-		pair := lipgloss.JoinHorizontal(lipgloss.Top, cols[0], gap, cols[1])
-		if lipgloss.Width(pair) > m.width-8 {
-			pair = lipgloss.JoinVertical(lipgloss.Left, cols[0], "", cols[1])
-		}
-		groups = lipgloss.JoinVertical(lipgloss.Left, pair, "", cols[2])
-	}
-	return strings.Join([]string{
+	l := m.qsLayout()
+	canvas := make([]string, l.glY+5)
+	copy(canvas, []string{
 		titleStyle.Render("Quick settings: " + qs.vm.Name()),
 		"",
 		dimStyle.Render("Saved to the .conf when you close this; applies on next start."),
-		"",
-		groups,
-		"",
-		qs.viewGL(),
-		"",
-		dimStyle.Render("↑↓ choose • space tick • tab/←→ switch • enter/esc save and close"),
-	}, "\n")
+	})
+	for g := range qsGroups {
+		for i, line := range l.cols[g] {
+			row := &canvas[l.at[g].y+i]
+			*row += strings.Repeat(" ", max(0, l.at[g].x-lipgloss.Width(*row))) + line
+		}
+	}
+	canvas[l.glY] = qs.viewGL()
+	canvas[l.glY+2] = button(qsButton)
+	canvas[l.glY+4] = dimStyle.Render("↑↓ choose • space tick • tab/←→ switch • enter/esc save and close")
+	return strings.Join(canvas, "\n")
 }
 
 func (qs quickSettings) viewGL() string {

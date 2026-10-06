@@ -12,7 +12,7 @@ import (
 
 // askRenameVM prompts for vm's new name, then confirms what will change.
 func (m *Model) askRenameVM(vm qemu.VM) tea.Cmd {
-	return m.askPrompt("Rename "+vm.Name()+" to", vm.Name(), func(m *Model, name string) tea.Cmd {
+	return m.askPrompt("Rename "+vm.Name()+" to", "Rename", vm.Name(), func(m *Model, name string) tea.Cmd {
 		if name == "" || name == vm.Name() {
 			return nil
 		}

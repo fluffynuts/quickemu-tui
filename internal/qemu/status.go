@@ -1,7 +1,6 @@
 package qemu
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -39,6 +38,8 @@ func (s RunState) String() string {
 type Status struct {
 	State  RunState
 	Detail string
+	// Started is when the qemu process started; zero if unknown.
+	Started time.Time
 }
 
 // IsUp is true for anything other than Stopped.
@@ -46,21 +47,24 @@ func (s Status) IsUp() bool {
 	return s.State != Stopped
 }
 
-func qemuPidAlive(pidFile string) bool {
+// qemuProcess reports whether the pid in pidFile is a live qemu (guarding
+// against PID reuse after quickemu left a stale pid file behind) and when it
+// started (zero if that can't be told). See proc_*.go for each OS.
+func qemuProcess(pidFile string) (started time.Time, alive bool) {
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
-		return false
+		return time.Time{}, false
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil || pid <= 0 {
-		return false
+		return time.Time{}, false
 	}
-	cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-	if err != nil {
-		return false
-	}
-	// guards against PID reuse after quickemu left a stale pid file behind
-	return bytes.Contains(cmdline, []byte("qemu"))
+	return processInfo(pid)
+}
+
+func started(pidFile string) time.Time {
+	t, _ := qemuProcess(pidFile)
+	return t
 }
 
 // QueryStatus asks the monitor first ("info status"), then falls back to the pid
@@ -73,13 +77,14 @@ func QueryStatus(v VM, timeout time.Duration) Status {
 	if _, err := os.Stat(p.MonitorSocket); err == nil {
 		if out, err := MonitorCommand(p.MonitorSocket, "info status", timeout); err == nil {
 			if strings.Contains(out, "paused") {
-				return Status{State: Paused, Detail: out}
+				return Status{State: Paused, Detail: out, Started: started(p.PidFile)}
 			}
-			return Status{State: Running, Detail: out}
+			return Status{State: Running, Detail: out, Started: started(p.PidFile)}
 		}
 	}
-	if qemuPidAlive(p.PidFile) {
-		return Status{State: Busy, Detail: "qemu is running but its monitor isn't answering (another client attached?)"}
+	if started, alive := qemuProcess(p.PidFile); alive {
+		return Status{State: Busy, Detail: "qemu is running but its monitor isn't answering (another client attached?)",
+			Started: started}
 	}
 	return Status{State: Stopped}
 }

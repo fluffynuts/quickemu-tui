@@ -149,6 +149,7 @@ func main() {
 	quickemu := flag.String("quickemu", "", "path to quickemu (default: found on PATH)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	doUpgrade := flag.Bool("upgrade", false, "download the latest release for this machine from GitHub and replace this binary")
+	noMouse := flag.Bool("no-mouse", false, "don't use the mouse, leaving it to the terminal (e.g. for selecting text without holding shift)")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(versionString())
@@ -198,7 +199,11 @@ func main() {
 		opts.CachePath = filepath.Join(dir, "quickemu-tui", "catalog.csv")
 	}
 
-	program := tea.NewProgram(tui.New(opts), tea.WithAltScreen())
+	programOpts := []tea.ProgramOption{tea.WithAltScreen()}
+	if !*noMouse {
+		programOpts = append(programOpts, tea.WithMouseCellMotion())
+	}
+	program := tea.NewProgram(tui.New(opts), programOpts...)
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "quickemu-tui:", err)
 		os.Exit(1)

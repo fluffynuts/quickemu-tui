@@ -41,39 +41,10 @@ func PlanDelete(v VM) (DeletePlan, error) {
 		}
 	}
 
-	dir := filepath.Clean(p.VMDir)
-	base := filepath.Clean(v.BaseDir())
-	rel, relErr := filepath.Rel(base, dir)
-	switch {
-	case relErr == nil && rel == ".":
-		plan.KeepReason = fmt.Sprintf("its disk is stored directly in %s, which holds your other VMs, so that directory is left alone", tilde(base))
-		return plan, nil
-	case relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)):
-		plan.KeepReason = fmt.Sprintf("%s isn't inside %s, so it's left alone", tilde(dir), tilde(base))
-		return plan, nil
-	}
-	st, err := os.Lstat(dir)
-	switch {
-	case os.IsNotExist(err):
-		return plan, nil // nothing to remove besides the conf
-	case err != nil:
+	dir, reason, err := ownDir(v, p)
+	if err != nil || dir == "" {
+		plan.KeepReason = reason
 		return plan, err
-	case st.Mode()&os.ModeSymlink != 0:
-		plan.KeepReason = fmt.Sprintf("%s is a symbolic link, so it's left alone", tilde(dir))
-		return plan, nil
-	case !st.IsDir():
-		plan.KeepReason = fmt.Sprintf("%s isn't a directory", tilde(dir))
-		return plan, nil
-	}
-	others, _ := Discover(base)
-	for _, o := range others {
-		if o.ConfPath == v.ConfPath {
-			continue
-		}
-		if op, err := o.Paths(); err == nil && filepath.Clean(op.VMDir) == dir {
-			plan.KeepReason = fmt.Sprintf("%s is also used by %s, so it's left alone", tilde(dir), o.Name())
-			return plan, nil
-		}
 	}
 
 	plan.Dir = dir
@@ -88,6 +59,44 @@ func PlanDelete(v VM) (DeletePlan, error) {
 		return nil
 	})
 	return plan, nil
+}
+
+// ownDir is v's folder (the directory of its disk image, p.VMDir) if it
+// belongs to v alone: a real directory strictly inside the directory holding
+// the .conf that no other VM uses. Otherwise it is empty, with the reason
+// (empty too when the folder doesn't exist).
+func ownDir(v VM, p Paths) (dir, reason string, err error) {
+	dir = filepath.Clean(p.VMDir)
+	base := filepath.Clean(v.BaseDir())
+	rel, relErr := filepath.Rel(base, dir)
+	switch {
+	case relErr == nil && rel == ".":
+		return "", fmt.Sprintf("its disk is stored directly in %s, which holds your other VMs, so that directory is left alone", tilde(base)), nil
+	case relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)):
+		return "", fmt.Sprintf("%s isn't inside %s, so it's left alone", tilde(dir), tilde(base)), nil
+	}
+	st, err := os.Lstat(dir)
+	switch {
+	case os.IsNotExist(err):
+		return "", "", nil // nothing besides the conf
+	case err != nil:
+		return "", "", err
+	case st.Mode()&os.ModeSymlink != 0:
+		return "", fmt.Sprintf("%s is a symbolic link, so it's left alone", tilde(dir)), nil
+	case !st.IsDir():
+		return "", fmt.Sprintf("%s isn't a directory", tilde(dir)), nil
+	}
+	others, _ := Discover(base)
+	for _, o := range others {
+		if o.ConfPath == v.ConfPath {
+			continue
+		}
+		if op, err := o.Paths(); err == nil && filepath.Clean(op.VMDir) == dir {
+			return "", fmt.Sprintf("%s is also used by %s, so it's left alone", tilde(dir), o.Name()), nil
+		}
+	}
+
+	return dir, "", nil
 }
 
 func tilde(p string) string {

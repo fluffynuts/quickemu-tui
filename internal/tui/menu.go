@@ -91,9 +91,28 @@ func (m Model) handleMenuKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// menuHeadLines is how many lines of the menu come before its items.
+const menuHeadLines = 2
+
+// menuItemAt is the index of the item on the menu's line (counted from the
+// top of its content), or -1 for the title or a gap.
+func menuItemAt(items []menuItem, line int) int {
+	l := menuHeadLines
+	for i, it := range items {
+		if it.gap {
+			l++
+		}
+		if l == line {
+			return i
+		}
+		l++
+	}
+	return -1
+}
+
 func (m Model) viewMenu() string {
 	vm, _ := m.selected()
-	lines := []string{titleStyle.Render(vm.Name()), ""}
+	lines := []string{titleStyle.Render(vm.Name()), ""} // menuHeadLines
 	items := m.menuItems()
 	labelW := 0
 	for _, it := range items {
@@ -112,7 +131,7 @@ func (m Model) viewMenu() string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "", dimStyle.Render("↑↓ select • enter/key run • esc close"))
+	lines = append(lines, "", dimStyle.Render("↑↓ select • enter/key/click run • esc close"))
 	return modalStyle.Render(strings.Join(lines, "\n"))
 }
 

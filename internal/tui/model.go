@@ -77,6 +77,9 @@ type diskState struct {
 	missing bool
 	info    qemu.DiskInfo
 	err     error
+	// footprint is the space all the VM's files take; footErr why it's unknown
+	footprint qemu.Footprint
+	footErr   error
 }
 
 // Model is the Bubble Tea model.
@@ -105,9 +108,10 @@ type Model struct {
 	flash    string
 	flashErr bool
 
-	input       textinput.Model
-	promptTitle string
-	onSubmit    func(m *Model, value string) tea.Cmd
+	input        textinput.Model
+	promptTitle  string
+	promptButton string
+	onSubmit     func(m *Model, value string) tea.Cmd
 
 	confirmText    string
 	confirmDefault confirmDefault
@@ -276,16 +280,24 @@ func gatherCmd(vms []qemu.VM) tea.Cmd {
 
 func loadDisk(vm qemu.VM) tea.Cmd {
 	return func() tea.Msg {
+		state := diskState{loaded: true}
+		state.footprint, state.footErr = qemu.MeasureFootprint(vm)
 		p, err := vm.Paths()
-		if err != nil {
-			return diskMsg{conf: vm.ConfPath, state: diskState{loaded: true, err: err}}
+		switch {
+		case err != nil:
+			state.err = err
+		case !exists(p.Disk):
+			state.missing = true
+		default:
+			state.info, state.err = qemu.GetDiskInfo(p.Disk)
 		}
-		if _, err := os.Stat(p.Disk); os.IsNotExist(err) {
-			return diskMsg{conf: vm.ConfPath, state: diskState{loaded: true, missing: true}}
-		}
-		info, err := qemu.GetDiskInfo(p.Disk)
-		return diskMsg{conf: vm.ConfPath, state: diskState{loaded: true, info: info, err: err}}
+		return diskMsg{conf: vm.ConfPath, state: state}
 	}
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
 }
 
 func loadMedia(vm qemu.VM) tea.Cmd {
@@ -435,10 +447,13 @@ func (m *Model) startVM(vm qemu.VM) tea.Cmd {
 	)
 }
 
-func (m *Model) askPrompt(title, initial string, onSubmit func(m *Model, value string) tea.Cmd) tea.Cmd {
+// askPrompt asks for a line of text, starting from initial. Enter, or
+// clicking the button labelled button, passes it to onSubmit.
+func (m *Model) askPrompt(title, button, initial string, onSubmit func(m *Model, value string) tea.Cmd) tea.Cmd {
 	m.returnMode = m.mode
 	m.mode = modePrompt
 	m.promptTitle = title
+	m.promptButton = button
 	m.onSubmit = onSubmit
 	m.input.Width = max(20, min(70, m.width-16))
 	m.input.SetValue(initial)
@@ -640,6 +655,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, loadDisk(vm))
 		}
 		return m, batch(cmds...)
+
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 
 	case tea.KeyMsg:
 		switch m.mode {
@@ -884,7 +902,7 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		conf := vm.ConfPath
-		return m, m.askPrompt("SSH into "+vm.Name()+" as user", os.Getenv("USER"), func(m *Model, user string) tea.Cmd {
+		return m, m.askPrompt("SSH into "+vm.Name()+" as user", "Connect", os.Getenv("USER"), func(m *Model, user string) tea.Cmd {
 			if user == "" {
 				return nil
 			}
@@ -921,7 +939,7 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 		if len(m.snapshots(vm)) > 0 {
 			initial = "snap-" + time.Now().Format("20060102-1504")
 		}
-		return m, m.askPrompt("New snapshot tag for "+vm.Name(), initial, func(m *Model, tag string) tea.Cmd {
+		return m, m.askPrompt("New snapshot tag for "+vm.Name(), "Save", initial, func(m *Model, tag string) tea.Cmd {
 			if err := qemu.ValidateTag(tag); err != nil {
 				m.setFlash(err.Error(), true)
 				return nil
@@ -1019,7 +1037,7 @@ func (m Model) handleMediaKey(key string) (tea.Model, tea.Cmd) {
 		} else if p, err := vm.Paths(); err == nil {
 			initial = p.VMDir + string(os.PathSeparator)
 		}
-		return m, m.askPrompt("Image to insert into "+dev.Name, initial, func(m *Model, value string) tea.Cmd {
+		return m, m.askPrompt("Image to insert into "+dev.Name, "Insert", initial, func(m *Model, value string) tea.Cmd {
 			if value == "" {
 				return nil
 			}
