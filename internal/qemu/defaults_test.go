@@ -99,6 +99,19 @@ func TestSetConfValueReplacesOrAppends(t *testing.T) {
 	}
 }
 
+func TestRemoveConfValueDropsEveryAssignment(t *testing.T) {
+	for _, tc := range []struct{ in, key, want string }{
+		{"a=\"1\"\nram=\"4G\"\n", "ram", "a=\"1\"\n"},
+		{"ram=\"4G\"\na=1\nram=\"2G\"\n", "ram", "a=1\n"},
+		{"# ram=\"4G\"\na=1\n", "ram", "# ram=\"4G\"\na=1\n"},
+		{"a=1\n", "ram", "a=1\n"},
+	} {
+		if got := RemoveConfValue(tc.in, tc.key); got != tc.want {
+			t.Errorf("RemoveConfValue(%q, %q) = %q, want %q", tc.in, tc.key, got, tc.want)
+		}
+	}
+}
+
 func TestRAMChoicesAndAutoTiers(t *testing.T) {
 	for _, tc := range []struct {
 		gib  int64

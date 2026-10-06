@@ -44,6 +44,7 @@ func (m Model) menuItems() []menuItem {
 		{key: "d", label: "Delete snapshot…", disabled: up || noSnap},
 
 		{key: "m", label: "Removable media…", disabled: !monitorUp, gap: true},
+		{key: "Q", label: "Quick Settings…"},
 		{key: "e", label: "Edit .conf"},
 		{key: "l", label: "View logs"},
 		{key: "x", label: "SSH in", disabled: !hasSSH || !info.status.IsUp()},

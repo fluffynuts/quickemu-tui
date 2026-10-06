@@ -122,10 +122,30 @@ func SetConfValue(text, line string) string {
 	return result + line + "\n"
 }
 
+// RemoveConfValue drops every assignment of key from text. Commented-out
+// assignments are left alone.
+func RemoveConfValue(text, key string) string {
+	lines := strings.Split(text, "\n")
+	out := lines[:0]
+	for _, l := range lines {
+		if k, ok := DefaultKey(l); ok && k == key {
+			continue
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
+}
+
 // SetConfValues applies SetConfValue for each line to the conf at path,
 // keeping its mode.
 func SetConfValues(path string, lines []string) error {
-	if len(lines) == 0 {
+	return EditConf(path, lines, nil)
+}
+
+// EditConf sets each of set (see SetConfValue) and removes every assignment
+// of each of unset in the conf at path, keeping its mode.
+func EditConf(path string, set, unset []string) error {
+	if len(set) == 0 && len(unset) == 0 {
 		return nil
 	}
 	st, err := os.Stat(path)
@@ -137,8 +157,11 @@ func SetConfValues(path string, lines []string) error {
 		return err
 	}
 	text := string(data)
-	for _, l := range lines {
+	for _, l := range set {
 		text = SetConfValue(text, l)
+	}
+	for _, k := range unset {
+		text = RemoveConfValue(text, k)
 	}
 	return os.WriteFile(path, []byte(text), st.Mode().Perm())
 }

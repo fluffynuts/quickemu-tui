@@ -33,8 +33,8 @@ const fullHelp = `  d  default VM options (e.g. gl="off"): added to new VMs, and
   n  install a new VM (quickget): pick OS, release, edition; shows download progress
   ↑/k ↓/j  move          tab    switch VM list / snapshot list      r  refresh
   enter    open the actions menu for the selected VM. Inside it, press an item's key
-           (s start, p shutdown, K force stop, c create, a revert, d delete snapshots, m media, e edit,
-           l logs, x ssh, o open folder, R rename VM, D delete VM) or move to it and press enter.
+           (s start, p shutdown, K force stop, c create, a revert, d delete snapshots, m media,
+           Q quick settings, e edit, l logs, x ssh, o open folder, R rename VM, D delete VM) or move to it and press enter.
   ?  toggle help         q      quit (VMs keep running)`
 
 // View renders the UI.
@@ -115,6 +115,8 @@ func (m Model) viewKeys() string {
 		keys = "↑↓ select • enter/c insert image • e eject • r refresh • esc close"
 	case modeDefaults:
 		keys = "ctrl+s save • esc discard"
+	case modeQuickSettings:
+		keys = "↑↓ choose • space tick • tab/←→ switch • enter/esc save and close"
 	case modeInstallPick:
 		keys = "type to filter • ↑↓ pgup pgdn • enter select • esc back"
 	case modeInstallProgress:
@@ -275,6 +277,8 @@ func (m Model) viewModal() string {
 		return modalStyle.Render(m.viewSnapRevert())
 	case modeDefaults:
 		return modalStyle.Render(m.viewDefaults())
+	case modeQuickSettings:
+		return modalStyle.Render(m.viewQuickSettings())
 	case modeInstallPick:
 		return modalStyle.Render(m.viewInstallPick())
 	case modeInstallProgress:

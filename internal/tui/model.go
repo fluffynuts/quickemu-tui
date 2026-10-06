@@ -43,6 +43,7 @@ const (
 	modeInstallPick
 	modeInstallProgress
 	modeDefaults
+	modeQuickSettings
 )
 
 type pane int
@@ -124,6 +125,8 @@ type Model struct {
 
 	revVM     qemu.VM
 	revCursor int
+
+	qs quickSettings
 
 	defaults []string
 	defInput textarea.Model
@@ -657,6 +660,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleInstallProgressKey(msg.String())
 		case modeDefaults:
 			return m.handleDefaultsKey(msg)
+		case modeQuickSettings:
+			return m.handleQuickSettingsKey(msg.String())
 		default:
 			return m.handleNormalKey(msg.String())
 		}
@@ -749,7 +754,7 @@ func (m *Model) declineConfirm() {
 }
 
 var mutatingKeys = map[string]bool{
-	"s": true, "p": true, "K": true, "c": true, "a": true, "d": true, "e": true, "D": true, "R": true,
+	"s": true, "p": true, "K": true, "c": true, "a": true, "d": true, "e": true, "D": true, "R": true, "Q": true,
 }
 
 func (m Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
@@ -849,6 +854,10 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 		m.mediaCursor = 0
 		m.mediaLoading = true
 		return m, loadMedia(vm)
+
+	case "Q":
+		m.openQuickSettings(vm)
+		return m, nil
 
 	case "e":
 		conf := vm.ConfPath
