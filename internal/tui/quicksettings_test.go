@@ -112,7 +112,8 @@ func TestQuickSettingsGLCheckbox(t *testing.T) {
 				t.Fatalf("gl ticked=%v, want %v", m.qs.gl, tc.ticked)
 			}
 			m, _ = keyOf(m, tab)
-			m, _ = keyOf(m, tab)                           // past CPUs and memory to the checkbox
+			m, _ = keyOf(m, tab)
+			m, _ = keyOf(m, tab)                           // past CPUs, memory and display to the checkbox
 			m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyDown}) // no list to move in
 			m, _ = keyOf(m, space)
 			if !strings.Contains(m.viewQuickSettings(), "OpenGL") {
@@ -135,5 +136,60 @@ func TestQuickSettingsGLTickedTwiceIsUnchanged(t *testing.T) {
 	m, _ = keyOf(m, enter)
 	if data, _ := os.ReadFile(path); string(data) != "a=1\n" {
 		t.Errorf(".conf rewritten: %q", data)
+	}
+}
+
+func TestQuickSettingsDisplay(t *testing.T) {
+	for name, tc := range map[string]struct {
+		conf   string
+		opened string
+		pick   string
+		want   string
+	}{
+		"auto to a size": {"a=1\n", "", "1024x768", "a=1\nwidth=\"1024\"\nheight=\"768\"\n"},
+		"size to fullscreen": {"width=\"800\"\nheight=\"600\"\n", "800x600", "fullscreen",
+			"fullscreen=\"on\"\n"},
+		"fullscreen to a size": {"fullscreen=\"on\"\n", "fullscreen", "1920x1080",
+			"width=\"1920\"\nheight=\"1080\"\n"},
+		"size to auto": {"a=1\nwidth=\"800\"\nheight=\"600\"\n", "800x600", "", "a=1\n"},
+		"hand-set size kept": {"width=\"1366\"\nheight=\"768\"\n", "1366x768", "1366x768",
+			"width=\"1366\"\nheight=\"768\"\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, path := newQuickSettingsModel(t, tc.conf)
+			m.openMenu()
+			m = typed(m, "Q")
+			if got := m.qs.picked(qsDisplay); got != tc.opened {
+				t.Fatalf("opened on display %q, want %q", got, tc.opened)
+			}
+			m.qs.group = qsDisplay
+			for m.qs.picked(qsDisplay) != tc.pick {
+				before := m.qs.cursor[qsDisplay]
+				m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyDown})
+				if m.qs.cursor[qsDisplay] == before {
+					m.qs.cursor[qsDisplay] = 0 // wrap to search from the top
+				}
+			}
+			if !strings.Contains(m.viewQuickSettings(), "Display") {
+				t.Error("view lacks the display group")
+			}
+			m, _ = keyOf(m, enter)
+			if data, _ := os.ReadFile(path); string(data) != tc.want {
+				t.Errorf(".conf is %q, want %q", data, tc.want)
+			}
+		})
+	}
+}
+
+func TestQuickSettingsDisplayChoices(t *testing.T) {
+	m, _ := newQuickSettingsModel(t, "a=1\n")
+	m.openMenu()
+	m = typed(m, "Q")
+	var got []string
+	for _, it := range m.qs.items[qsDisplay] {
+		got = append(got, it.label)
+	}
+	if want := "auto 800x600 1024x768 1920x1080 fullscreen"; strings.Join(got, " ") != want {
+		t.Errorf("display choices %q, want %q", strings.Join(got, " "), want)
 	}
 }

@@ -10,21 +10,24 @@ import (
 	"github.com/fluffynuts/quickemu-tui/internal/qemu"
 )
 
-// The quick settings dialog has one single-select group per .conf key, offering
-// the same choices as the CPU and memory steps of a new install, then a
-// checkbox for gl.
+// The quick settings dialog has single-select groups for CPUs and memory,
+// offering the same choices as those steps of a new install, and for the
+// display, then a checkbox for gl.
 const (
 	qsCPU = iota
 	qsRAM
+	qsDisplay
 	qsGroups
 	qsGL      = qsGroups // focus index of the gl checkbox, after the groups
 	qsFocuses = qsGL + 1
 )
 
-var (
-	qsKeys   = [qsGroups]string{"cpu_cores", "ram"}
-	qsTitles = [qsGroups]string{"CPUs", "Memory"}
-)
+var qsTitles = [qsGroups]string{"CPUs", "Memory", "Display"}
+
+// displaySizes are the window sizes offered; "fullscreen" follows them.
+var displaySizes = []string{"800x600", "1024x768", "1920x1080"}
+
+const fullscreen = "fullscreen"
 
 // quickSettings is the dialog's state: each group's choices, which one is
 // picked, and what the .conf said when it opened ("" for unset, i.e. auto).
@@ -48,15 +51,71 @@ func (m *Model) openQuickSettings(vm qemu.VM) {
 	}
 	m.host = readHostInfo()
 	qs := quickSettings{vm: vm}
-	all := [qsGroups][]pickItem{m.cpuItems(), m.ramItems()}
+	all := [qsGroups][]pickItem{m.cpuItems(), m.ramItems(), m.displayItems()}
 	for g := range qsGroups {
-		qs.was[g] = conf[qsKeys[g]]
+		qs.was[g] = qsValue(conf, g)
 		qs.items[g], qs.cursor[g] = markCurrent(all[g], qs.was[g])
 	}
 	qs.gl, qs.glHint = m.glSetting(conf["gl"])
 	qs.glWas = qs.gl
 	m.qs = qs
 	m.mode = modeQuickSettings
+}
+
+// qsValue is group g's value according to conf: "" when unset (auto). The
+// display is "fullscreen" (our own key, which startVM turns into quickemu's
+// --fullscreen), else "WxH" when both width and height are set, as quickemu
+// ignores either alone.
+func qsValue(conf map[string]string, g int) string {
+	switch g {
+	case qsCPU:
+		return conf["cpu_cores"]
+	case qsRAM:
+		return conf["ram"]
+	}
+	if conf["fullscreen"] == "on" {
+		return fullscreen
+	}
+	if conf["width"] != "" && conf["height"] != "" {
+		return conf["width"] + "x" + conf["height"]
+	}
+	return ""
+}
+
+// qsEdits are the .conf lines to set and keys to unset to make group g's
+// value v.
+func qsEdits(g int, v string) (set, unset []string) {
+	assign := func(k, v string) string { return k + `="` + v + `"` }
+	switch g {
+	case qsCPU, qsRAM:
+		k := map[int]string{qsCPU: "cpu_cores", qsRAM: "ram"}[g]
+		if v == "" {
+			return nil, []string{k}
+		}
+		return []string{assign(k, v)}, nil
+	}
+	if v == fullscreen {
+		return []string{assign("fullscreen", "on")}, []string{"width", "height"}
+	}
+	w, h, ok := strings.Cut(v, "x")
+	if !ok {
+		return nil, []string{"fullscreen", "width", "height"}
+	}
+	return []string{assign("width", w), assign("height", h)}, []string{"fullscreen"}
+}
+
+func (m Model) displayItems() []pickItem {
+	hint := "quickemu's default"
+	if d := m.defaultFor("fullscreen"); d != "" {
+		hint = "your default: " + d
+	} else if w, h := m.defaultFor("width"), m.defaultFor("height"); w != "" && h != "" {
+		hint = "your default: " + w + " " + h
+	}
+	items := []pickItem{{value: "", label: "auto", hint: hint}}
+	for _, s := range displaySizes {
+		items = append(items, pickItem{value: s, label: s})
+	}
+	return append(items, pickItem{value: fullscreen, label: fullscreen})
 }
 
 // glSetting is whether gl is on for a VM whose .conf sets gl to value, and
@@ -134,10 +193,9 @@ func (m Model) saveQuickSettings() (tea.Model, tea.Cmd) {
 		v := qs.picked(g)
 		switch {
 		case v == qs.was[g]:
-		case v == "":
-			unset = append(unset, qsKeys[g])
 		default:
-			set = append(set, qsKeys[g]+`="`+v+`"`)
+			s, u := qsEdits(g, v)
+			set, unset = append(set, s...), append(unset, u...)
 		}
 	}
 	if qs.gl != qs.glWas {
@@ -152,8 +210,9 @@ func (m Model) saveQuickSettings() (tea.Model, tea.Cmd) {
 		m.showError("Saving "+qs.vm.Name()+"'s settings failed", err.Error())
 		return m, nil
 	}
-	m.setFlash(fmt.Sprintf("%s: CPUs %s, memory %s, gl %s (applies on next start)",
-		qs.vm.Name(), or(qs.picked(qsCPU), "auto"), or(qs.picked(qsRAM), "auto"), onOff(qs.gl)), false)
+	m.setFlash(fmt.Sprintf("%s: CPUs %s, memory %s, display %s, gl %s (applies on next start)",
+		qs.vm.Name(), or(qs.picked(qsCPU), "auto"), or(qs.picked(qsRAM), "auto"),
+		or(qs.picked(qsDisplay), "auto"), onOff(qs.gl)), false)
 	return m, m.pollNow()
 }
 
@@ -164,9 +223,16 @@ func (m Model) viewQuickSettings() string {
 	for g := range qsGroups {
 		cols[g] = strings.Join(qs.viewGroup(g, listRows), "\n")
 	}
-	groups := lipgloss.JoinHorizontal(lipgloss.Top, cols[0], "    ", cols[1])
+	// side by side if they fit, else the first two side by side above the
+	// display, else all stacked
+	gap := "    "
+	groups := lipgloss.JoinHorizontal(lipgloss.Top, cols[0], gap, cols[1], gap, cols[2])
 	if lipgloss.Width(groups) > m.width-8 {
-		groups = lipgloss.JoinVertical(lipgloss.Left, cols[0], "", cols[1])
+		pair := lipgloss.JoinHorizontal(lipgloss.Top, cols[0], gap, cols[1])
+		if lipgloss.Width(pair) > m.width-8 {
+			pair = lipgloss.JoinVertical(lipgloss.Left, cols[0], "", cols[1])
+		}
+		groups = lipgloss.JoinVertical(lipgloss.Left, pair, "", cols[2])
 	}
 	return strings.Join([]string{
 		titleStyle.Render("Quick settings: " + qs.vm.Name()),

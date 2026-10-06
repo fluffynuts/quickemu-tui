@@ -414,7 +414,12 @@ func (m *Model) startVM(vm qemu.VM) tea.Cmd {
 	}
 	// fill in the user's default options the conf hasn't set (never overriding it)
 	added, mergeErr := applyDefaultsTo(m.defaults, vm.ConfPath)
-	cmd, err := qemu.Start(vm, q)
+	var args []string
+	if conf, err := vm.Conf(); err == nil && conf["fullscreen"] == "on" {
+		// quickemu only takes fullscreen on the command line
+		args = append(args, "--fullscreen")
+	}
+	cmd, err := qemu.Start(vm, q, args...)
 	if err != nil {
 		m.setFlash("Starting "+vm.Name()+" failed: "+firstLine(err.Error()), true)
 		m.showError("Starting "+vm.Name()+" failed", err.Error())

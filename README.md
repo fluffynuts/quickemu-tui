@@ -64,7 +64,7 @@ The keys below are shortcuts that work **inside the actions menu only**: pressin
 | s / p / K | start / ACPI shutdown / force stop (`quickemu --kill`, falls back to monitor `quit`) |
 | c / a / d | create snapshot / revert / delete: `a` opens a picker (enter reverts, `s` reverts then starts, both after confirming); `d` opens a checklist (space ticks, `a` ticks all, enter deletes the ticked ones after confirming) |
 | m | removable media: swap or eject ISOs on a running VM |
-| Q | quick settings: pick the number of CPUs and the memory (the same choices as a new install, or `auto`) and tick OpenGL on or off; on closing, what changed is written to the `.conf` (`cpu_cores=`/`ram=` set, or removed for `auto`; `gl="on"`/`"off"`), applying on the next start |
+| Q | quick settings: pick the number of CPUs and the memory (the same choices as a new install, or `auto`), the display (`auto`, 800x600, 1024x768, 1920x1080 or fullscreen) and tick OpenGL on or off; on closing, what changed is written to the `.conf` (`cpu_cores=`/`ram=` set, or removed for `auto`; `width=`/`height=` for a size, or `fullscreen="on"`, which quickemu-tui passes to quickemu as `--fullscreen`; `gl="on"`/`"off"`), applying on the next start |
 | e | edit the `.conf` in `$VISUAL`/`$EDITOR` (nano if unset) |
 | l | logs: quickemu's log, the launch output, the generated launch script |
 | x | ssh in via the forwarded port |
