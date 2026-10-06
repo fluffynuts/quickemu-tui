@@ -4,6 +4,15 @@ A terminal UI for [quickemu](https://github.com/quickemu-project/quickemu) VMs,
 focused on the "disposable test box" loop: start, poke, shut down, revert to
 `pristine`, repeat.
 
+Main screen
+![main screen](images/main.png)
+
+Virtual machine settings
+![vm settings](images/vm-settings.png)
+
+Quick settings
+![quick settings](images/quick-settings.png)
+
 ## Build
 
 ```bash
