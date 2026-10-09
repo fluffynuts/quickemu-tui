@@ -48,6 +48,9 @@ func (m Model) View() string {
 	if m.firstFetch {
 		return m.viewFirstFetch()
 	}
+	if m.quitWhenIdle {
+		return m.viewWaitingToQuit()
+	}
 	header := m.viewHeader()
 	footer := m.viewFooter()
 	_, bodyHeight := m.bodyArea()
@@ -72,6 +75,16 @@ func (m Model) viewFirstFetch() string {
 		"",
 		dimStyle.Render("first run only: this can take a minute"),
 		dimStyle.Render("q to quit"))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
+}
+
+// viewWaitingToQuit is the whole screen after choosing to quit once a
+// background refresh is done.
+func (m Model) viewWaitingToQuit() string {
+	msg := lipgloss.JoinVertical(lipgloss.Center,
+		m.spin.View()+" finishing the background download of guest operating system releases…",
+		"",
+		dimStyle.Render("quitting when it's done • ctrl+c to quit now"))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
 }
 

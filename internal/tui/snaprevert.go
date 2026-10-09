@@ -26,7 +26,7 @@ func (m Model) handleSnapRevertKey(key string) (tea.Model, tea.Cmd) {
 	m.revCursor = clamp(m.revCursor, 0, len(snaps)-1)
 	switch key {
 	case "ctrl+c":
-		return m.requestQuit()
+		return m.interruptQuit()
 	case "esc", "q":
 		m.mode = modeNormal
 	case "up", "k":

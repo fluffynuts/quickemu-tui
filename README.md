@@ -13,6 +13,10 @@ Virtual machine settings
 Quick settings
 ![quick settings](images/quick-settings.png)
 
+New Guest
+![new guest](images/new-guest.png)
+![select release](images/new-guest-release.png)
+
 ## Build
 
 ```bash
@@ -99,7 +103,9 @@ doesn't wait: it's copied into the cache at startup, and the list is refreshed
 from your own quickget in the background straight away. A build without that
 copy (such as a local `make build`) waits for quickget on its first run
 instead. Deleting `~/.cache/quickemu-tui` starts afresh. A failed refresh is
-silent while there's a cached list to use. Pick an OS (type to filter),
+silent while there's a cached list to use. Pressing `q` during a refresh asks
+whether to abort it; by default the app waits for it to finish (so it's
+cached) and then quits. `ctrl+c` quits at once. Pick an OS (type to filter),
 a release, and an edition if there is one. Then choose the number of CPUs
 (1 to one less than the host's logical CPUs) and the memory (4G steps up to
 about half the host's RAM), or leave either on `auto`, where quickemu sizes the

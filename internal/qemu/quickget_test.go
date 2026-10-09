@@ -210,12 +210,18 @@ echo "jq: parse error: noise" >&2
 cat <<'EOF'
 `+sampleCSV+`EOF
 `)
-	c, raw, err := FetchCatalog(q)
+	c, raw, err := FetchCatalog(context.Background(), q)
 	if err != nil || len(c.OSes()) != 4 || !strings.HasPrefix(string(raw), "Display Name,") {
 		t.Fatalf("catalog=%d raw=%q err=%v", len(c.OSes()), raw, err)
 	}
-	if _, _, err := FetchCatalog(fakeQuickget(t, "exit 1\n")); err == nil {
+	if _, _, err := FetchCatalog(context.Background(), fakeQuickget(t, "exit 1\n")); err == nil {
 		t.Error("expected an error when quickget fails")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(100 * time.Millisecond); cancel() }()
+	start := time.Now()
+	if _, _, err := FetchCatalog(ctx, fakeQuickget(t, "sleep 30\n")); err == nil || time.Since(start) > 5*time.Second {
+		t.Errorf("cancelling should stop quickget promptly: err=%v after %v", err, time.Since(start))
 	}
 }
 

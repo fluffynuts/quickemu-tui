@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -284,7 +285,7 @@ func TestStartupFetchPopulatesCacheAndModel(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "catalog.csv")
 
 	m := New(Options{Root: t.TempDir(), CachePath: cache})
-	msg := fetchCatalogCmd("", cache)()
+	msg := fetchCatalogCmd(context.Background(), "", cache)()
 	next, _ := m.Update(msg)
 	m = next.(Model)
 	if m.catalogLoading || len(m.catalog.OSes()) != 3 {
@@ -574,5 +575,95 @@ func TestPrefetchedDatesSurviveAFailedLookup(t *testing.T) {
 	m = typed(m, "ubuntu")
 	if _, cmd := keyOf(m, enter); cmd != nil {
 		t.Error("dates looked up again")
+	}
+}
+
+func isQuit(cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	_, ok := cmd().(tea.QuitMsg)
+	return ok
+}
+
+var (
+	quitKey = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}
+	ctrlC   = tea.KeyMsg{Type: tea.KeyCtrlC}
+)
+
+const waitPrompt = "Background download of guest operating system releases is ongoing. Abort?"
+
+func TestQuitWithNothingInTheBackground(t *testing.T) {
+	m := newInstallModel(t)
+	m.catalogLoading = false
+	if _, cmd := keyOf(m, quitKey); !isQuit(cmd) {
+		t.Error("q should quit straight away when nothing is downloading")
+	}
+}
+
+func TestQuitCanWaitForTheBackgroundRefresh(t *testing.T) {
+	m := New(Options{Root: t.TempDir()}) // fetching the list, as at startup
+	m.width, m.height = 100, 40
+	m, cmd := keyOf(m, quitKey)
+	if m.mode != modeConfirm || m.confirmText != waitPrompt || cmd != nil {
+		t.Fatalf("mode=%v text=%q", m.mode, m.confirmText)
+	}
+	if v := m.View(); !strings.Contains(v, "y/N") {
+		t.Errorf("no should be the default:\n%s", v)
+	}
+	m, _ = keyOf(m, enter) // the default: don't abort
+	if !m.quitWhenIdle || !strings.Contains(m.View(), "finishing the background download") {
+		t.Fatalf("not waiting: quitWhenIdle=%v\n%s", m.quitWhenIdle, m.View())
+	}
+	if m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")}); m.mode != modeNormal || !m.quitWhenIdle {
+		t.Error("keys other than ctrl+c should be ignored while waiting")
+	}
+
+	// the list arrives, which starts the release-date lookups: keep waiting
+	fresh, _ := qemu.ParseCatalog([]byte(testCSV))
+	// (the command it returns does the lookup, so it isn't run here)
+	next, _ := m.Update(catalogMsg{catalog: fresh})
+	m = next.(Model)
+	if m.bg.Err() != nil || !m.refreshing() {
+		t.Fatalf("quit before the release dates were fetched: refreshing=%v", m.refreshing())
+	}
+	if _, cmd := m.Update(releaseDatesPrefetchMsg{}); !isQuit(cmd) {
+		t.Error("should quit once everything is fetched")
+	}
+}
+
+func TestQuitCanAbortTheBackgroundRefresh(t *testing.T) {
+	m := New(Options{Root: t.TempDir()})
+	m.width, m.height = 100, 40
+	m, _ = keyOf(m, quitKey)
+	m, cmd := keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if !isQuit(cmd) || m.bg.Err() == nil {
+		t.Errorf("y should quit and stop the download: quit=%v cancelled=%v", isQuit(cmd), m.bg.Err() != nil)
+	}
+}
+
+func TestDismissingTheQuitPromptStaysOpen(t *testing.T) {
+	m := New(Options{Root: t.TempDir()})
+	m.width, m.height = 100, 40
+	m, _ = keyOf(m, quitKey)
+	m, cmd := keyOf(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeNormal || m.quitWhenIdle || cmd != nil {
+		t.Errorf("esc should cancel quitting: mode=%v quitWhenIdle=%v", m.mode, m.quitWhenIdle)
+	}
+}
+
+func TestCtrlCDoesntWaitForTheBackgroundRefresh(t *testing.T) {
+	m := New(Options{Root: t.TempDir()})
+	m.width, m.height = 100, 40
+	if m2, cmd := keyOf(m, ctrlC); !isQuit(cmd) || m2.bg.Err() == nil {
+		t.Error("ctrl+c should quit at once")
+	}
+	// nor once waiting
+	m = New(Options{Root: t.TempDir()})
+	m.width, m.height = 100, 40
+	m, _ = keyOf(m, quitKey)
+	m, _ = keyOf(m, enter)
+	if _, cmd := keyOf(m, ctrlC); !isQuit(cmd) {
+		t.Error("ctrl+c while waiting should quit at once")
 	}
 }

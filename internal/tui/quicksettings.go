@@ -150,7 +150,7 @@ func (m Model) handleQuickSettingsKey(key string) (tea.Model, tea.Cmd) {
 	g := qs.group
 	switch key {
 	case "ctrl+c":
-		return m.requestQuit()
+		return m.interruptQuit()
 	case "esc", "enter", "q":
 		return m.saveQuickSettings()
 	case "tab", "right", "l":

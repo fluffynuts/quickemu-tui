@@ -67,13 +67,14 @@ func readCatalogCacheCmd(path string) tea.Cmd {
 }
 
 // fetchCatalogCmd asks quickget for the list (slow) and refreshes the cache.
-func fetchCatalogCmd(quickemuOverride, cachePath string) tea.Cmd {
+// Cancelling ctx stops quickget.
+func fetchCatalogCmd(ctx context.Context, quickemuOverride, cachePath string) tea.Cmd {
 	return func() tea.Msg {
 		q, err := qemu.FindQuickget(quickemuOverride)
 		if err != nil {
 			return catalogMsg{err: errors.New("quickget not found on PATH (it ships with quickemu)")}
 		}
-		c, raw, err := qemu.FetchCatalog(q)
+		c, raw, err := qemu.FetchCatalog(ctx, q)
 		var saveErr error
 		if err == nil && cachePath != "" {
 			saveErr = qemu.WriteCatalogCache(cachePath, raw)
@@ -93,7 +94,7 @@ func (m Model) onCatalog(msg catalogMsg) (tea.Model, tea.Cmd) {
 			}
 			m.firstFetch = true
 			m.catalogLoading = true
-			return m, batch(m.ensureSpin(), fetchCatalogCmd(m.opts.Quickemu, m.opts.CachePath))
+			return m, batch(m.ensureSpin(), fetchCatalogCmd(m.bg, m.opts.Quickemu, m.opts.CachePath))
 		}
 		// an old list is better than none; a fresher one replaces it when it arrives
 		if len(m.catalog) == 0 {
@@ -102,7 +103,7 @@ func (m Model) onCatalog(msg catalogMsg) (tea.Model, tea.Cmd) {
 		var refresh tea.Cmd
 		if msg.stale && !m.catalogLoading {
 			m.catalogLoading = true
-			refresh = fetchCatalogCmd(m.opts.Quickemu, m.opts.CachePath)
+			refresh = fetchCatalogCmd(m.bg, m.opts.Quickemu, m.opts.CachePath)
 		}
 		return m, batch(refresh, m.prefetchReleaseDatesCmd())
 	}
@@ -152,26 +153,28 @@ type releaseDatesPrefetchMsg map[string]qemu.ReleaseDates
 
 // prefetchReleaseDatesCmd fills in release dates for the whole catalog in the
 // background. Fresh cached answers make it quick; stale ones are refreshed.
-func (m Model) prefetchReleaseDatesCmd() tea.Cmd {
+func (m *Model) prefetchReleaseDatesCmd() tea.Cmd {
 	if len(m.catalog) == 0 {
 		return nil
 	}
-	cat, dir := m.catalog, m.releaseDatesCacheDir()
+	m.datesLoading++
+	ctx, cat, dir := m.bg, m.catalog, m.releaseDatesCacheDir()
 	return func() tea.Msg {
-		return releaseDatesPrefetchMsg(qemu.PrefetchReleaseDates(context.Background(), cat, dir))
+		return releaseDatesPrefetchMsg(qemu.PrefetchReleaseDates(ctx, cat, dir))
 	}
 }
 
 // releaseDatesCmd looks up release dates for osID, once per run, should the
 // OS be picked before the prefetch has found them.
-func (m Model) releaseDatesCmd(osID string) tea.Cmd {
+func (m *Model) releaseDatesCmd(osID string) tea.Cmd {
 	if _, asked := m.relDates[osID]; asked || !qemu.HasReleaseDates(osID) {
 		return nil
 	}
 	m.relDates[osID] = nil // shared map: marks it asked for in every copy
-	releases, cacheDir := m.catalog.Releases(osID), m.releaseDatesCacheDir()
+	m.datesLoading++
+	ctx, releases, cacheDir := m.bg, m.catalog.Releases(osID), m.releaseDatesCacheDir()
 	return func() tea.Msg {
-		d, _ := qemu.FetchReleaseDates(context.Background(), osID, releases, cacheDir)
+		d, _ := qemu.FetchReleaseDates(ctx, osID, releases, cacheDir)
 		return releaseDatesMsg{os: osID, dates: d}
 	}
 }
@@ -219,7 +222,7 @@ func (m *Model) openInstall() tea.Cmd {
 	}
 	// nothing usable yet, or the last refresh failed: try again now
 	m.catalogLoading = true
-	return fetchCatalogCmd(m.opts.Quickemu, m.opts.CachePath)
+	return fetchCatalogCmd(m.bg, m.opts.Quickemu, m.opts.CachePath)
 }
 
 func (m Model) instItems() []pickItem {
@@ -271,7 +274,7 @@ func (m Model) handleInstallPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	items := m.instItems()
 	switch msg.String() {
 	case "ctrl+c":
-		return m.requestQuit()
+		return m.interruptQuit()
 	case "esc":
 		switch {
 		case m.instFilter != "":
@@ -473,7 +476,7 @@ func (m *Model) stopInstall() {
 func (m Model) handleInstallProgressKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+c":
-		return m.requestQuit()
+		return m.interruptQuit()
 	case "esc", "enter", "b":
 		m.mode = modeNormal // keeps running; n brings this back
 	case "c":

@@ -55,7 +55,7 @@ func (m *Model) openDefaults() tea.Cmd {
 func (m Model) handleDefaultsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m.requestQuit()
+		return m.interruptQuit()
 	case "esc":
 		m.mode = modeNormal
 		m.defInput.Blur()

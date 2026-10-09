@@ -51,11 +51,15 @@ func FindQuickget(quickemuOverride string) (string, error) {
 // FetchCatalog asks quickget what it can install, returning the parsed list and
 // the raw CSV (for caching). quickget's stderr is noisy (stray jq errors) and
 // is deliberately discarded. This takes minutes: quickget asks every
-// distribution's website for its releases.
-func FetchCatalog(quickget string) (Catalog, []byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+// distribution's website for its releases. Cancelling ctx stops quickget and
+// the downloads under it.
+func FetchCatalog(ctx context.Context, quickget string) (Catalog, []byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, quickget, "--list-csv")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // so we can stop curl too
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
+	cmd.WaitDelay = 5 * time.Second
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {

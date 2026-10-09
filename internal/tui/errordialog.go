@@ -41,7 +41,7 @@ func (m *Model) showError(title, text string) {
 func (m Model) handleErrorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m.requestQuit()
+		return m.interruptQuit()
 	case "esc", "q", "enter":
 		m.mode = m.errReturn
 		return m, nil

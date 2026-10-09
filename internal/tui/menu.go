@@ -67,7 +67,7 @@ func (m Model) handleMenuKey(key string) (tea.Model, tea.Cmd) {
 	items := m.menuItems()
 	switch key {
 	case "ctrl+c":
-		return m.requestQuit()
+		return m.interruptQuit()
 	case "esc", "q":
 		m.mode = modeNormal
 	case "up", "k":

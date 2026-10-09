@@ -4,6 +4,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -116,6 +117,7 @@ type Model struct {
 	confirmText    string
 	confirmDefault confirmDefault
 	onConfirm      func(m *Model) tea.Cmd
+	onDecline      func(m *Model) tea.Cmd // for n (not esc), if the dialog wants it
 
 	mediaVM      qemu.VM
 	media        []qemu.BlockDevice
@@ -141,16 +143,22 @@ type Model struct {
 	catalogErr     error                        // the last quickget fetch failed with this
 	relDates       map[string]qemu.ReleaseDates // by OS id; an entry (even nil) means asked already
 	firstFetch     bool                         // no cached catalog: the UI waits for quickget
-	instStep       installStep
-	instFilter     string
-	instCursor     int
-	instOS         string
-	instRelease    string
-	instEdition    string
-	instCores      string // "" for auto
-	instRAM        string // e.g. "8G"; "" for auto
-	host           hostInfo
-	install        *installState
+	datesLoading   int                          // release-date lookups in flight
+	quitWhenIdle   bool                         // quitting once the background refresh is done
+
+	// bg is cancelled on quit, to stop background refreshes (and quickget)
+	bg          context.Context
+	stopBg      context.CancelFunc
+	instStep    installStep
+	instFilter  string
+	instCursor  int
+	instOS      string
+	instRelease string
+	instEdition string
+	instCores   string // "" for auto
+	instRAM     string // e.g. "8G"; "" for auto
+	host        hostInfo
+	install     *installState
 
 	errTitle  string
 	errReturn mode
@@ -215,7 +223,10 @@ func New(opts Options) Model {
 	ti.CharLimit = 4096
 	ti.Prompt = "› "
 
+	bg, stopBg := context.WithCancel(context.Background())
 	m := Model{
+		bg:           bg,
+		stopBg:       stopBg,
 		opts:         opts,
 		infos:        make(map[string]vmInfo),
 		disks:        make(map[string]diskState),
@@ -244,7 +255,7 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) initCatalogCmd() tea.Cmd {
 	if m.opts.CachePath == "" {
-		return fetchCatalogCmd(m.opts.Quickemu, "")
+		return fetchCatalogCmd(m.bg, m.opts.Quickemu, "")
 	}
 	return readCatalogCacheCmd(m.opts.CachePath)
 }
@@ -488,6 +499,7 @@ func (m *Model) askConfirm(text string, def confirmDefault, onYes func(m *Model)
 	m.confirmText = text
 	m.confirmDefault = def
 	m.onConfirm = onYes
+	m.onDecline = nil
 }
 
 func (m *Model) move(delta int) tea.Cmd {
@@ -552,7 +564,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.busy == 0 && len(m.launching) == 0 && !m.firstFetch {
+		if m.busy == 0 && len(m.launching) == 0 && !m.firstFetch && !m.quitWhenIdle {
 			m.spinning = false // let the tick loop die while idle
 			return m, nil
 		}
@@ -565,19 +577,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, batch(tick(), m.pollNow())
 
 	case catalogMsg:
-		return m.onCatalog(msg)
+		next, cmd := m.onCatalog(msg)
+		return next.(Model).quitIfIdle(cmd)
 
 	case releaseDatesMsg:
+		m.datesLoading--
 		if msg.dates != nil || m.relDates[msg.os] == nil { // a failure mustn't hide prefetched dates
 			m.relDates[msg.os] = msg.dates
 		}
-		return m, nil
+		return m.quitIfIdle(nil)
 
 	case releaseDatesPrefetchMsg:
+		m.datesLoading--
 		for os, d := range msg {
 			m.relDates[os] = d
 		}
-		return m, nil
+		return m.quitIfIdle(nil)
 
 	case installProgressMsg:
 		return m.onInstallProgress(msg)
@@ -681,16 +696,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, batch(cmds...)
 
 	case tea.MouseMsg:
-		if m.firstFetch {
+		if m.firstFetch || m.quitWhenIdle {
 			return m, nil
 		}
 		return m.handleMouse(msg)
 
 	case tea.KeyMsg:
-		if m.firstFetch {
+		if m.firstFetch || m.quitWhenIdle {
 			switch msg.String() {
-			case "ctrl+c", "q":
-				return m, tea.Quit
+			case "ctrl+c":
+				return m, m.quitNow()
+			case "q":
+				if m.firstFetch {
+					return m, m.quitNow()
+				}
 			}
 			return m, nil
 		}
@@ -739,25 +758,67 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) requestQuit() (tea.Model, tea.Cmd) {
+// requestQuit is q: it checks before abandoning anything in progress,
+// including a background refresh of the installable-systems list.
+func (m Model) requestQuit() (tea.Model, tea.Cmd) { return m.quit(true) }
+
+// interruptQuit is ctrl+c: like q, but it never waits on a background refresh.
+func (m Model) interruptQuit() (tea.Model, tea.Cmd) { return m.quit(false) }
+
+func (m Model) quit(offerWait bool) (tea.Model, tea.Cmd) {
 	if m.install != nil && m.mode != modeConfirm {
 		m.askConfirm("A VM install ("+m.install.title+") is still downloading. Quit and stop it?\nPartly downloaded files are kept so it can resume.", defaultNo, func(m *Model) tea.Cmd {
 			m.stopInstall()
-			return tea.Quit
+			return m.finishQuit(offerWait)
 		})
 		return m, nil
 	}
 	if m.busy > 0 && m.mode != modeConfirm {
-		m.askConfirm("An operation is still running. Quit anyway?", defaultNo, func(*Model) tea.Cmd { return tea.Quit })
+		m.askConfirm("An operation is still running. Quit anyway?", defaultNo, func(m *Model) tea.Cmd { return m.finishQuit(offerWait) })
 		return m, nil
 	}
-	return m, tea.Quit
+	return m, m.finishQuit(offerWait)
+}
+
+// refreshing reports whether the installable-systems list or release dates
+// are being fetched in the background.
+func (m Model) refreshing() bool { return m.catalogLoading || m.datesLoading > 0 }
+
+// finishQuit quits, first offering to let a background refresh finish so
+// that what it's fetched gets cached.
+func (m *Model) finishQuit(offerWait bool) tea.Cmd {
+	if !offerWait || !m.refreshing() {
+		return m.quitNow()
+	}
+	m.askConfirm("Background download of guest operating system releases is ongoing. Abort?", defaultNo, func(m *Model) tea.Cmd {
+		return m.quitNow()
+	})
+	m.onDecline = func(m *Model) tea.Cmd {
+		m.quitWhenIdle = true
+		return m.ensureSpin()
+	}
+	return nil
+}
+
+// quitNow stops any background refresh and quits.
+func (m *Model) quitNow() tea.Cmd {
+	m.stopBg()
+	return tea.Quit
+}
+
+// quitIfIdle quits once a background refresh someone chose to wait for is
+// done; until then it passes cmd on (which may start the next part of it).
+func (m Model) quitIfIdle(cmd tea.Cmd) (tea.Model, tea.Cmd) {
+	if m.quitWhenIdle && !m.refreshing() {
+		return m, m.quitNow()
+	}
+	return m, cmd
 }
 
 func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m.requestQuit()
+		return m.interruptQuit()
 	case "esc":
 		m.mode = m.returnMode
 		m.input.Blur()
@@ -781,16 +842,18 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+c":
-		return m, tea.Quit
+		return m, m.quitNow()
 	case "enter":
 		if m.confirmDefault == defaultYes {
 			return m.acceptConfirm()
 		}
-		m.declineConfirm()
+		return m.declineConfirm(true)
 	case "y", "Y":
 		return m.acceptConfirm()
-	case "n", "N", "esc", "q":
-		m.declineConfirm()
+	case "n", "N":
+		return m.declineConfirm(true)
+	case "esc", "q":
+		return m.declineConfirm(false)
 	}
 	return m, nil
 }
@@ -805,9 +868,16 @@ func (m Model) acceptConfirm() (tea.Model, tea.Cmd) {
 	return m, fn(&m)
 }
 
-func (m *Model) declineConfirm() {
+// declineConfirm closes the dialog. Answering no (rather than dismissing it)
+// also runs the dialog's onDecline, if it has one.
+func (m Model) declineConfirm(answeredNo bool) (tea.Model, tea.Cmd) {
 	m.mode = m.returnMode
-	m.onConfirm = nil
+	fn := m.onDecline
+	m.onConfirm, m.onDecline = nil, nil
+	if fn == nil || !answeredNo {
+		return m, nil
+	}
+	return m, fn(&m)
 }
 
 var mutatingKeys = map[string]bool{
@@ -816,8 +886,10 @@ var mutatingKeys = map[string]bool{
 
 func (m Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "q":
 		return m.requestQuit()
+	case "ctrl+c":
+		return m.interruptQuit()
 	case "?":
 		m.showHelp = !m.showHelp
 		return m, nil
@@ -1038,7 +1110,7 @@ func (m Model) handleMediaKey(key string) (tea.Model, tea.Cmd) {
 	vm := m.mediaVM
 	switch key {
 	case "ctrl+c":
-		return m.requestQuit()
+		return m.interruptQuit()
 	case "esc", "q":
 		m.mode = modeNormal
 		return m, nil
@@ -1091,7 +1163,7 @@ func (m Model) handleMediaKey(key string) (tea.Model, tea.Cmd) {
 func (m Model) handleLogsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m.requestQuit()
+		return m.interruptQuit()
 	case "esc", "q":
 		m.mode = modeNormal
 		return m, nil

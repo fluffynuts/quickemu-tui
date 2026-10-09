@@ -34,7 +34,7 @@ func (m Model) handleSnapDeleteKey(key string) (tea.Model, tea.Cmd) {
 	m.delCursor = clamp(m.delCursor, 0, len(snaps)-1)
 	switch key {
 	case "ctrl+c":
-		return m.requestQuit()
+		return m.interruptQuit()
 	case "esc", "q":
 		m.mode = modeNormal
 	case "up", "k":
