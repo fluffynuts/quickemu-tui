@@ -50,9 +50,10 @@ func FindQuickget(quickemuOverride string) (string, error) {
 
 // FetchCatalog asks quickget what it can install, returning the parsed list and
 // the raw CSV (for caching). quickget's stderr is noisy (stray jq errors) and
-// is deliberately discarded. This can take many seconds.
+// is deliberately discarded. This takes minutes: quickget asks every
+// distribution's website for its releases.
 func FetchCatalog(quickget string) (Catalog, []byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, quickget, "--list-csv")
 	var out bytes.Buffer
@@ -64,18 +65,27 @@ func FetchCatalog(quickget string) (Catalog, []byte, error) {
 	return cat, out.Bytes(), err
 }
 
-// ReadCatalogCache loads a catalog saved by WriteCatalogCache. A missing file
-// is an error the caller can ignore: the cache is only an accelerator.
-func ReadCatalogCache(path string) (Catalog, error) {
+// CacheTTL is how long the cached catalog and release dates are used before
+// they're refreshed. quickget's list and release dates change rarely.
+const CacheTTL = 7 * 24 * time.Hour
+
+// ReadCatalogCache loads a catalog saved by WriteCatalogCache, and says
+// whether it's older than CacheTTL. A missing file is an error the caller
+// can ignore: the cache is only an accelerator.
+func ReadCatalogCache(path string) (cat Catalog, stale bool, err error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, false, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	cat, err := ParseCatalog(data)
+	cat, err = ParseCatalog(data)
 	if err == nil && len(cat) == 0 {
 		err = errors.New("empty catalog cache")
 	}
-	return cat, err
+	return cat, time.Since(st.ModTime()) >= CacheTTL, err
 }
 
 // WriteCatalogCache saves quickget's CSV, replacing the old file atomically so
@@ -157,9 +167,48 @@ func (c Catalog) OSes() []OSChoice {
 	return out
 }
 
-// Releases lists an OS's releases in quickget's order.
+// Releases lists an OS's releases, newest first as far as can be told from
+// the names alone. quickget's own order is no help: --list-csv sorts its
+// rows, so a release list arrives alphabetical, not chronological.
 func (c Catalog) Releases(os string) []string {
-	return c.distinct(func(e CatalogEntry) (string, bool) { return e.Release, e.OS == os })
+	rels := c.distinct(func(e CatalogEntry) (string, bool) { return e.Release, e.OS == os })
+	sort.SliceStable(rels, func(i, j int) bool { return compareRelease(rels[i], rels[j]) > 0 })
+	return rels
+}
+
+var releaseChunkRe = regexp.MustCompile(`\d+|\D+`)
+
+// compareRelease orders release names naturally: digit runs compare as
+// numbers ("9" < "10"), and a number sorts above a word in the same place, so
+// "24.04" outranks "daily-live". Words compare case-insensitively, which suits
+// alphabetical code names (Devuan's chimaera < daedalus).
+func compareRelease(a, b string) int {
+	ac := releaseChunkRe.FindAllString(strings.ToLower(a), -1)
+	bc := releaseChunkRe.FindAllString(strings.ToLower(b), -1)
+	for i := 0; i < len(ac) && i < len(bc); i++ {
+		x, y := ac[i], bc[i]
+		xn, yn := x[0] >= '0' && x[0] <= '9', y[0] >= '0' && y[0] <= '9'
+		switch {
+		case xn && yn:
+			x, y = strings.TrimLeft(x, "0"), strings.TrimLeft(y, "0")
+			if len(x) != len(y) {
+				return len(x) - len(y)
+			}
+			if c := strings.Compare(x, y); c != 0 {
+				return c
+			}
+		case xn != yn:
+			if xn {
+				return 1
+			}
+			return -1
+		default:
+			if c := strings.Compare(x, y); c != 0 {
+				return c
+			}
+		}
+	}
+	return len(ac) - len(bc)
 }
 
 // Editions lists the editions of an OS release. A release without editions

@@ -45,6 +45,9 @@ func (m Model) View() string {
 	if m.width == 0 {
 		return "loading…"
 	}
+	if m.firstFetch {
+		return m.viewFirstFetch()
+	}
 	header := m.viewHeader()
 	footer := m.viewFooter()
 	_, bodyHeight := m.bodyArea()
@@ -59,6 +62,17 @@ func (m Model) View() string {
 		body = lipgloss.Place(m.width, bodyHeight, lipgloss.Center, lipgloss.Center, m.dialogBox())
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+}
+
+// viewFirstFetch is the whole screen while quickget is first asked what it
+// can install. Later runs use the cached answer.
+func (m Model) viewFirstFetch() string {
+	msg := lipgloss.JoinVertical(lipgloss.Center,
+		m.spin.View()+" fetching supported guest operating systems…",
+		"",
+		dimStyle.Render("first run only: this can take a minute"),
+		dimStyle.Render("q to quit"))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
 }
 
 // bodyArea is the screen row the body (between header and footer) starts on,

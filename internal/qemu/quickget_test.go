@@ -32,7 +32,7 @@ func TestCatalog(t *testing.T) {
 	if want := []string{"Alpine", "Ubuntu", "Windows", "Zorin OS"}; !reflect.DeepEqual(names, want) {
 		t.Errorf("OSes = %v, want %v", names, want)
 	}
-	if got, want := c.Releases("ubuntu"), []string{"22.04", "24.04"}; !reflect.DeepEqual(got, want) {
+	if got, want := c.Releases("ubuntu"), []string{"24.04", "22.04"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Releases = %v, want %v", got, want)
 	}
 	if got := c.Editions("ubuntu", "24.04"); got != nil {
@@ -49,6 +49,28 @@ func TestCatalog(t *testing.T) {
 func TestParseCatalogRejectsGarbage(t *testing.T) {
 	if _, err := ParseCatalog([]byte("a,b\n1,2\n")); err == nil {
 		t.Error("expected an error for a list without OS/Release columns")
+	}
+}
+
+func TestReleasesNewestFirst(t *testing.T) {
+	for name, tc := range map[string]struct{ csv, want []string }{
+		"code names":          {[]string{"chimaera", "daedalus"}, []string{"daedalus", "chimaera"}},
+		"numbers, not text":   {[]string{"10", "11", "9"}, []string{"11", "10", "9"}},
+		"point releases":      {[]string{"23", "23.1", "22", "21"}, []string{"23.1", "23", "22", "21"}},
+		"words after numbers": {[]string{"22.04", "24.04", "daily-live", "25.04"}, []string{"25.04", "24.04", "22.04", "daily-live"}},
+		"betas":               {[]string{"r1beta3", "r1beta5", "r1beta4"}, []string{"r1beta5", "r1beta4", "r1beta3"}},
+	} {
+		data := "Display Name,OS,Release,Option\n"
+		for _, r := range tc.csv {
+			data += "X,x," + r + ",\n"
+		}
+		c, err := ParseCatalog([]byte(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.Releases("x"); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: Releases = %v, want %v", name, got, tc.want)
+		}
 	}
 }
 
@@ -150,15 +172,22 @@ func TestOutputLooksFailed(t *testing.T) {
 
 func TestCatalogCacheRoundTripAndBadCache(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "sub", "catalog.csv")
-	if _, err := ReadCatalogCache(p); err == nil {
+	if _, _, err := ReadCatalogCache(p); err == nil {
 		t.Error("missing cache should be an error")
 	}
 	if err := WriteCatalogCache(p, []byte(sampleCSV)); err != nil {
 		t.Fatal(err)
 	}
-	c, err := ReadCatalogCache(p)
-	if err != nil || len(c.OSes()) != 4 {
-		t.Fatalf("got %d OSes, err %v", len(c.OSes()), err)
+	c, stale, err := ReadCatalogCache(p)
+	if err != nil || len(c.OSes()) != 4 || stale {
+		t.Fatalf("got %d OSes, stale %v, err %v", len(c.OSes()), stale, err)
+	}
+	old := time.Now().Add(-CacheTTL - time.Minute)
+	if err := os.Chtimes(p, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, stale, _ = ReadCatalogCache(p); !stale {
+		t.Error("a cache older than CacheTTL should be stale")
 	}
 	// overwriting leaves no temp files behind
 	if err := WriteCatalogCache(p, []byte(sampleCSV)); err != nil {
@@ -170,7 +199,7 @@ func TestCatalogCacheRoundTripAndBadCache(t *testing.T) {
 	if err := os.WriteFile(p, []byte("garbage"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadCatalogCache(p); err == nil {
+	if _, _, err := ReadCatalogCache(p); err == nil {
 		t.Error("corrupt cache should be an error")
 	}
 }

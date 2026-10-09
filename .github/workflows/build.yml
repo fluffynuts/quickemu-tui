@@ -11,11 +11,19 @@
 # number as the third part: 0.1.57. Every push to master is released, so the
 # run number is what tells those releases apart, and it keeps each release a
 # valid semantic version that GitHub sorts above the last.
+#
+# Each build embeds a seed for the app's cache (see internal/seed): the list
+# of guest systems quickget can install, and their release dates. Making one
+# takes minutes, so pushes reuse the seed attached to the latest release. Once
+# a week (or when run by hand) a fresh seed is made instead, and released only
+# if it differs from the last one.
 name: build
 
 on:
   push:
   workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * 1" # Mondays, 04:23 UTC
 
 # Reading the repo is all this needs: uploading a run's artifacts is
 # authorised by the run itself, not by the token's permissions.
@@ -23,6 +31,84 @@ permissions:
   contents: read
 
 jobs:
+  seed:
+    name: seed
+    runs-on: ubuntu-latest
+    outputs:
+      # whether this run made a seed that differs from the last release's
+      changed: ${{ steps.make.outputs.changed }}
+      # whether there's a seed for this build at all
+      packed: ${{ steps.pack.outputs.packed }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Fetch the latest release's seed
+        id: last
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p last
+          if gh release download --pattern quickemu-tui-seed.tar.gz; then
+            tar -xzf quickemu-tui-seed.tar.gz -C last
+            rm quickemu-tui-seed.tar.gz
+            echo "found=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "found=false" >>"$GITHUB_OUTPUT"
+          fi
+      # quickget only looks for quickemu, never runs it, but won't start
+      # without it. Both come from quickemu's latest release.
+      - name: Install quickget
+        if: github.event_name != 'push' || steps.last.outputs.found != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release view --repo quickemu-project/quickemu --json tagName --jq .tagName)
+          mkdir -p "$HOME/.local/bin"
+          for tool in quickget quickemu; do
+            curl -fsSL -o "$HOME/.local/bin/$tool" \
+              "https://raw.githubusercontent.com/quickemu-project/quickemu/$tag/$tool"
+            chmod +x "$HOME/.local/bin/$tool"
+          done
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+          echo "quickget from quickemu $tag"
+      - name: Make the seed
+        id: make
+        env:
+          EVENT: ${{ github.event_name }}
+          FOUND: ${{ steps.last.outputs.found }}
+        run: |
+          if [ "$EVENT" = push ] && [ "$FOUND" = true ]; then
+            cp -R last/. internal/seed/data/
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+          elif go run ./cmd/genseed -previous last >genseed.out; then
+            cat genseed.out
+            # its last line is changed=true or changed=false
+            tail -n 1 genseed.out >>"$GITHUB_OUTPUT"
+          elif [ "$EVENT" = push ]; then
+            # don't hold up a code release; it just won't carry a seed
+            echo "::warning::couldn't make a seed, so this build has none"
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+          else
+            exit 1
+          fi
+      - name: Pack the seed
+        id: pack
+        run: |
+          if [ -f internal/seed/data/generated ]; then
+            tar -czf quickemu-tui-seed.tar.gz -C internal/seed/data --exclude README.md .
+            echo "packed=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "packed=false" >>"$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@v7
+        if: steps.pack.outputs.packed == 'true'
+        with:
+          path: quickemu-tui-seed.tar.gz
+          archive: false
+          if-no-files-found: error
+
   test:
     name: test (${{ matrix.os }})
     strategy:
@@ -47,7 +133,9 @@ jobs:
 
   package:
     name: package (${{ matrix.goos }}/${{ matrix.goarch }})
-    needs: test
+    needs: [test, seed]
+    # a weekly run that found nothing new has nothing to build
+    if: github.event_name != 'schedule' || needs.seed.outputs.changed == 'true'
     strategy:
       matrix:
         include:
@@ -63,6 +151,16 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - uses: actions/download-artifact@v8
+        if: needs.seed.outputs.packed == 'true'
+        with:
+          pattern: quickemu-tui-seed.tar.gz
+          merge-multiple: true
+          path: seed
+          skip-decompress: true
+      - name: Put the seed in place
+        if: needs.seed.outputs.packed == 'true'
+        run: tar -xzf "$(find seed -type f -name quickemu-tui-seed.tar.gz | head -n 1)" -C internal/seed/data
       - name: Package
         id: dist
         env:
@@ -83,8 +181,11 @@ jobs:
 
   release:
     name: release
-    needs: package
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [package, seed]
+    # every push to master; otherwise only a changed seed
+    if: >-
+      github.ref == 'refs/heads/master' &&
+      (github.event_name == 'push' || needs.seed.outputs.changed == 'true')
     runs-on: ubuntu-latest
     # Publishing a release creates its tag, which is a write to the repo;
     # only this job asks for that.
@@ -105,10 +206,18 @@ jobs:
           # into a folder, and re-zipping those would lose the executable
           # bit the package job's zip(1) kept.
           skip-decompress: true
+      - uses: actions/download-artifact@v8
+        if: needs.seed.outputs.packed == 'true'
+        with:
+          pattern: quickemu-tui-seed.tar.gz
+          merge-multiple: true
+          path: seed
+          skip-decompress: true
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD: ${{ github.run_number }}
+          EVENT: ${{ github.event_name }}
         run: |
           version="$(tr -d '[:space:]' <VERSION).$BUILD"
           tag="v$version"
@@ -135,8 +244,21 @@ jobs:
           (cd release && sha256sum quickemu-tui-*.zip >SHA256SUMS)
           cat release/SHA256SUMS
           assets=(release/quickemu-tui-*.zip release/SHA256SUMS)
+          # the seed this build embeds: the next push build reuses it, and
+          # the weekly run compares a fresh one with it
+          seed=$(find seed -type f -name quickemu-tui-seed.tar.gz 2>/dev/null | head -n 1)
+          if [ -n "$seed" ]; then
+            cp "$seed" release/
+            assets+=(release/quickemu-tui-seed.tar.gz)
+          fi
+          title="quickemu-tui $version"
+          intro=""
+          if [ "$EVENT" != push ]; then
+            title="Update cache pre-seed for guest operating systems"
+            intro=$'This release only updates the list of guest operating systems, and their release dates, that quickemu-tui starts with.\n\n'
+          fi
           notes=$(cat <<EOF
-          quickemu-tui is a terminal UI for quickemu VMs. It needs \`quickemu\` (which provides \`quickget\`) and \`qemu-img\` installed.
+          ${intro}quickemu-tui is a terminal UI for quickemu VMs. It needs \`quickemu\` (which provides \`quickget\`) and \`qemu-img\` installed.
 
           To install, download the zip for your platform (below), unzip it, and put \`quickemu-tui\` somewhere on your PATH:
 
@@ -167,7 +289,7 @@ jobs:
           else
             gh release create "$tag" "${assets[@]}" \
               --target "$GITHUB_SHA" \
-              --title "quickemu-tui $version" \
+              --title "$title" \
               --notes "$notes" \
               --generate-notes \
               --latest

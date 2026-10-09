@@ -138,7 +138,9 @@ type Model struct {
 
 	catalog        qemu.Catalog
 	catalogLoading bool
-	catalogErr     error // the last quickget fetch failed with this
+	catalogErr     error                        // the last quickget fetch failed with this
+	relDates       map[string]qemu.ReleaseDates // by OS id; an entry (even nil) means asked already
+	firstFetch     bool                         // no cached catalog: the UI waits for quickget
 	instStep       installStep
 	instFilter     string
 	instCursor     int
@@ -218,6 +220,7 @@ func New(opts Options) Model {
 		infos:        make(map[string]vmInfo),
 		disks:        make(map[string]diskState),
 		launching:    make(map[string]bool),
+		relDates:     make(map[string]qemu.ReleaseDates),
 		spin:         sp,
 		input:        ti,
 		logView:      viewport.New(80, 20),
@@ -226,7 +229,9 @@ func New(opts Options) Model {
 		defInput:     newDefaultsInput(),
 		pollInFlight: true, // Init issues the first poll
 	}
-	m.catalogLoading = true // Init starts the fetch
+	// Init reads the cached catalog, which decides when to ask quickget;
+	// without a cache to read, it asks quickget straight away
+	m.catalogLoading = opts.CachePath == ""
 	m.rediscover()
 	return m
 }
@@ -234,7 +239,14 @@ func New(opts Options) Model {
 // Init starts polling.
 func (m Model) Init() tea.Cmd {
 	return batch(tick(), gatherCmd(m.vms), m.loadSelectedDisk(),
-		readCatalogCacheCmd(m.opts.CachePath), fetchCatalogCmd(m.opts.Quickemu, m.opts.CachePath))
+		m.initCatalogCmd())
+}
+
+func (m Model) initCatalogCmd() tea.Cmd {
+	if m.opts.CachePath == "" {
+		return fetchCatalogCmd(m.opts.Quickemu, "")
+	}
+	return readCatalogCacheCmd(m.opts.CachePath)
 }
 
 // --- commands ---------------------------------------------------------------
@@ -540,7 +552,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.busy == 0 && len(m.launching) == 0 {
+		if m.busy == 0 && len(m.launching) == 0 && !m.firstFetch {
 			m.spinning = false // let the tick loop die while idle
 			return m, nil
 		}
@@ -554,6 +566,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case catalogMsg:
 		return m.onCatalog(msg)
+
+	case releaseDatesMsg:
+		if msg.dates != nil || m.relDates[msg.os] == nil { // a failure mustn't hide prefetched dates
+			m.relDates[msg.os] = msg.dates
+		}
+		return m, nil
+
+	case releaseDatesPrefetchMsg:
+		for os, d := range msg {
+			m.relDates[os] = d
+		}
+		return m, nil
 
 	case installProgressMsg:
 		return m.onInstallProgress(msg)
@@ -657,9 +681,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, batch(cmds...)
 
 	case tea.MouseMsg:
+		if m.firstFetch {
+			return m, nil
+		}
 		return m.handleMouse(msg)
 
 	case tea.KeyMsg:
+		if m.firstFetch {
+			switch msg.String() {
+			case "ctrl+c", "q":
+				return m, tea.Quit
+			}
+			return m, nil
+		}
 		switch m.mode {
 		case modePrompt:
 			return m.handlePromptKey(msg)

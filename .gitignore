@@ -1,3 +1,6 @@
 /quickemu-tui
 /dist/
 .idea
+# made by `make seed`, or put in place by CI; see internal/seed
+/internal/seed/data/*
+!/internal/seed/data/README.md

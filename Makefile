@@ -28,9 +28,12 @@ PLATFORM    := $(if $(filter darwin,$(GOOS)),macos,$(GOOS))
 DIST_DIR    := dist
 DIST_NAME   := $(BINARY)-$(FULL_VERSION)-$(PLATFORM)-$(GOARCH)
 
-SOURCES := $(shell find . -name '*.go' -not -path './vendor/*') go.mod
+# The seed data is embedded, so a new seed means a new binary. Its folders are
+# listed too: removing a file changes the folder's time, not any file's.
+SOURCES := $(shell find . -name '*.go' -not -path './vendor/*') go.mod \
+	$(shell find internal/seed/data 2>/dev/null)
 
-.PHONY: all build test vet fmt tidy run install uninstall clean dist
+.PHONY: all build test vet fmt tidy run install uninstall clean dist seed
 
 all: build
 
@@ -74,6 +77,13 @@ dist:
 	@cp README.md $(DIST_DIR)/$(DIST_NAME)/
 	@cd $(DIST_DIR) && zip -qr $(DIST_NAME).zip $(DIST_NAME)
 	@echo $(DIST_DIR)/$(DIST_NAME).zip
+
+# Refreshes the data a build embeds to seed a first run's cache (see
+# internal/seed): asks quickget what it can install (slow: minutes) and
+# endoflife.date for release dates. Needs quickget on PATH. Without it, a
+# build simply has no seed.
+seed:
+	$(GO) run ./cmd/genseed
 
 clean:
 	rm -rf $(BINARY) $(DIST_DIR)

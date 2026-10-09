@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/fluffynuts/quickemu-tui/internal/config"
+	"github.com/fluffynuts/quickemu-tui/internal/seed"
 	"github.com/fluffynuts/quickemu-tui/internal/tui"
 	"github.com/fluffynuts/quickemu-tui/internal/upgrade"
 )
@@ -196,7 +197,13 @@ func main() {
 	}
 
 	if dir, err := os.UserCacheDir(); err == nil {
-		opts.CachePath = filepath.Join(dir, "quickemu-tui", "catalog.csv")
+		cacheDir := filepath.Join(dir, "quickemu-tui")
+		opts.CachePath = filepath.Join(cacheDir, seed.CatalogFile)
+		// a first run starts from the lists this build carries, rather than
+		// waiting minutes for quickget
+		if err := seed.Unpack(cacheDir); err != nil {
+			fmt.Fprintln(os.Stderr, "quickemu-tui: couldn't seed the cache:", err)
+		}
 	}
 
 	programOpts := []tea.ProgramOption{tea.WithAltScreen()}

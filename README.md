@@ -87,12 +87,19 @@ The keys below are shortcuts that work **inside the actions menu only**: pressin
 ## Installing a new VM
 
 Press `n`. The list of what can be installed comes from `quickget --list-csv`
-(so it always matches your installed quickemu). That command can take several
-seconds, so it runs in the background at startup and the result is cached in
-`~/.cache/quickemu-tui/catalog.csv`: the cached list is available immediately
-on the next launch while a fresh one is fetched. If you press `n` before any
-list exists, the picker waits for the fetch; if the fetch fails you'll be told
-(and `n` retries), but a failed refresh with a cached list is silent. Pick an OS (type to filter),
+(so it matches your installed quickemu). That command takes minutes, so the
+result is cached in `~/.cache/quickemu-tui/catalog.csv` and refreshed in the
+background once it's a week old. Releases are listed newest first, with their
+release dates (and whether they're past end of life) from
+[endoflife.date](https://endoflife.date) where it knows the system; those are
+cached in `~/.cache/quickemu-tui/release-dates/` and refreshed weekly too.
+
+Release builds carry a copy of both, made when they were built, so a first run
+doesn't wait: it's copied into the cache at startup, and the list is refreshed
+from your own quickget in the background straight away. A build without that
+copy (such as a local `make build`) waits for quickget on its first run
+instead. Deleting `~/.cache/quickemu-tui` starts afresh. A failed refresh is
+silent while there's a cached list to use. Pick an OS (type to filter),
 a release, and an edition if there is one. Then choose the number of CPUs
 (1 to one less than the host's logical CPUs) and the memory (4G steps up to
 about half the host's RAM), or leave either on `auto`, where quickemu sizes the

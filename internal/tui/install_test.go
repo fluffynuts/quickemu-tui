@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -289,7 +290,7 @@ func TestStartupFetchPopulatesCacheAndModel(t *testing.T) {
 	if m.catalogLoading || len(m.catalog.OSes()) != 3 {
 		t.Fatalf("loading=%v OSes=%d", m.catalogLoading, len(m.catalog.OSes()))
 	}
-	if c, err := qemu.ReadCatalogCache(cache); err != nil || len(c.OSes()) != 3 {
+	if c, _, err := qemu.ReadCatalogCache(cache); err != nil || len(c.OSes()) != 3 {
 		t.Fatalf("cache not written: %v", err)
 	}
 
@@ -459,5 +460,119 @@ func TestInstallWritesPickedSizeOverQuickgetsAndDefaults(t *testing.T) {
 	}
 	if got, want := string(data), "guest_os=\"linux\"\nram=\"12G\"\ncpu_cores=\"6\"\ngl=\"off\"\n"; got != want {
 		t.Fatalf(".conf =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestReleasePickerShowsDates(t *testing.T) {
+	m := newInstallModel(t)
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m = typed(m, "ubuntu")
+	m, cmd := keyOf(m, enter)
+	if m.instStep != stepRelease || cmd == nil {
+		t.Fatalf("step=%v cmd=%v, want the release step and a date lookup", m.instStep, cmd)
+	}
+	if items := m.instItems(); items[0].value != "24.04" || items[0].hint != "" {
+		t.Fatalf("before the dates arrive: %+v", items)
+	}
+	day := func(s string) time.Time { d, _ := time.Parse(time.DateOnly, s); return d }
+	n, _ := m.Update(releaseDatesMsg{os: "ubuntu", dates: qemu.ReleaseDates{
+		"24.04": {Date: day("2024-04-25")},
+		"22.04": {Date: day("2022-04-21"), EOL: true},
+	}})
+	m = n.(Model)
+	items := m.instItems()
+	if items[0].hint != "2024-04-25" || items[1].hint != "2022-04-21 (end of life)" {
+		t.Errorf("hints: %+v", items)
+	}
+	// back out and in again: the dates are already known
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = typed(m, "ubuntu")
+	if _, cmd = keyOf(m, enter); cmd != nil {
+		t.Error("dates were looked up a second time")
+	}
+}
+
+func TestFirstRunWaitsForTheCatalog(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "catalog.csv") // not there yet
+	m := New(Options{Root: t.TempDir(), CachePath: cache})
+	m.width, m.height = 100, 40
+	if m.catalogLoading {
+		t.Fatal("nothing should be fetched before the cache has been read")
+	}
+	next, cmd := m.Update(readCatalogCacheCmd(cache)())
+	m = next.(Model)
+	if !m.firstFetch || !m.catalogLoading || cmd == nil {
+		t.Fatalf("no cache: firstFetch=%v loading=%v cmd=%v", m.firstFetch, m.catalogLoading, cmd != nil)
+	}
+	if v := m.View(); !strings.Contains(v, "fetching supported guest operating systems") {
+		t.Errorf("no waiting screen:\n%s", v)
+	}
+	if m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")}); m.mode != modeNormal {
+		t.Errorf("keys should wait for the list: mode=%v", m.mode)
+	}
+
+	fresh, _ := qemu.ParseCatalog([]byte(testCSV))
+	next, cmd = m.Update(catalogMsg{catalog: fresh})
+	m = next.(Model)
+	if m.firstFetch || len(m.catalog) == 0 || cmd == nil {
+		t.Fatalf("after the fetch: firstFetch=%v catalog=%d prefetch=%v", m.firstFetch, len(m.catalog), cmd != nil)
+	}
+	if v := m.View(); strings.Contains(v, "fetching supported guest operating systems") {
+		t.Errorf("still waiting:\n%s", v)
+	}
+}
+
+func TestFirstRunFetchFailureLetsTheUserIn(t *testing.T) {
+	m := New(Options{Root: t.TempDir(), CachePath: filepath.Join(t.TempDir(), "catalog.csv")})
+	m.width, m.height = 100, 40
+	next, _ := m.Update(catalogMsg{cached: true, err: os.ErrNotExist})
+	next, _ = next.(Model).Update(catalogMsg{err: errors.New("quickget not found")})
+	m = next.(Model)
+	if m.firstFetch || m.mode != modeNormal || !m.flashErr || !strings.Contains(m.flash, "quickget not found") {
+		t.Fatalf("firstFetch=%v mode=%v flash=%q", m.firstFetch, m.mode, m.flash)
+	}
+}
+
+func TestCachedCatalogRefreshesOnlyWhenStale(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "catalog.csv")
+	if err := qemu.WriteCatalogCache(cache, []byte(testCSV)); err != nil {
+		t.Fatal(err)
+	}
+	load := func() Model {
+		t.Helper()
+		m := New(Options{Root: t.TempDir(), CachePath: cache})
+		next, cmd := m.Update(readCatalogCacheCmd(cache)())
+		m = next.(Model)
+		if m.firstFetch || len(m.catalog) == 0 || cmd == nil {
+			t.Fatalf("cached list not used: firstFetch=%v catalog=%d prefetch=%v", m.firstFetch, len(m.catalog), cmd != nil)
+		}
+		return m
+	}
+	if m := load(); m.catalogLoading {
+		t.Error("a fresh cache shouldn't be refreshed")
+	}
+	old := time.Now().Add(-qemu.CacheTTL - time.Minute)
+	if err := os.Chtimes(cache, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if m := load(); !m.catalogLoading {
+		t.Error("a stale cache should be refreshed in the background")
+	}
+}
+
+func TestPrefetchedDatesSurviveAFailedLookup(t *testing.T) {
+	m := newInstallModel(t)
+	dates := qemu.ReleaseDates{"24.04": {}}
+	next, _ := m.Update(releaseDatesPrefetchMsg{"ubuntu": dates})
+	next, _ = next.(Model).Update(releaseDatesMsg{os: "ubuntu"})
+	m = next.(Model)
+	if _, ok := m.relDates["ubuntu"]["24.04"]; !ok {
+		t.Errorf("prefetched dates lost: %v", m.relDates)
+	}
+	// and with them in hand, picking the OS asks for nothing more
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m = typed(m, "ubuntu")
+	if _, cmd := keyOf(m, enter); cmd != nil {
+		t.Error("dates looked up again")
 	}
 }
