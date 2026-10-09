@@ -35,8 +35,8 @@ func TestUnpackSeedsAnEmptyCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	stamp, _ := time.Parse(time.RFC3339, made)
-	if got, mtime := read(t, filepath.Join(dir, "catalog.csv")); got != "cat" || !mtime.Before(stamp) {
-		t.Errorf("catalog %q dated %v: should be dated long ago, to be refreshed", got, mtime)
+	if got, mtime := read(t, filepath.Join(dir, "catalog.csv")); got != "cat" || !mtime.Equal(stamp) {
+		t.Errorf("catalog %q dated %v, want the seed's date", got, mtime)
 	}
 	if got, mtime := read(t, filepath.Join(dir, "release-dates", "devuan.json")); got != "dev" || !mtime.Equal(stamp) {
 		t.Errorf("release dates %q dated %v, want the seed's date", got, mtime)
@@ -73,8 +73,8 @@ func TestUnpackKeepsNewerDataAndReplacesOlder(t *testing.T) {
 }
 
 func TestUnpackLeavesASeededCatalogAlone(t *testing.T) {
-	// the unpacked catalog is dated long ago, so later runs must see it's
-	// unchanged rather than rewrite it every time
+	// later runs must see the unpacked seed is unchanged rather than rewrite
+	// it every time
 	dir := t.TempDir()
 	fsys := seedFS("cat", "dev")
 	if err := unpack(fsys, dir); err != nil {

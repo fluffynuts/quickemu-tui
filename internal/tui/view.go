@@ -83,6 +83,7 @@ func (m Model) viewFirstFetch() string {
 func (m Model) viewWaitingToQuit() string {
 	msg := lipgloss.JoinVertical(lipgloss.Center,
 		m.spin.View()+" finishing the background download of guest operating system releases…",
+		dimStyle.Render("(this may take a few minutes)"),
 		"",
 		dimStyle.Render("quitting when it's done • ctrl+c to quit now"))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)

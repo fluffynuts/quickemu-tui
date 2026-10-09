@@ -99,8 +99,8 @@ release dates (and whether they're past end of life) from
 cached in `~/.cache/quickemu-tui/release-dates/` and refreshed weekly too.
 
 Release builds carry a copy of both, made when they were built, so a first run
-doesn't wait: it's copied into the cache at startup, and the list is refreshed
-from your own quickget in the background straight away. A build without that
+doesn't wait: it's copied into the cache at startup, dated when the copy was
+made, and refreshed from your own quickget once that's a week old. A build without that
 copy (such as a local `make build`) waits for quickget on its first run
 instead. Deleting `~/.cache/quickemu-tui` starts afresh. A failed refresh is
 silent while there's a cached list to use. Pressing `q` during a refresh asks

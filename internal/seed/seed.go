@@ -38,12 +38,8 @@ const ReleaseDatesDir = "release-dates"
 
 // Unpack copies the seed data into cacheDir: each file that's missing, or
 // that's older than the seed and differs from it. Newer cached data, fetched
-// on this machine, is left alone.
-//
-// Release dates get the seed's own date, so they're refreshed once they're a
-// week old, as usual. The catalog is dated long ago instead, so it's
-// refreshed in the background straight away: it's what quickget listed when
-// quickemu-tui was built, which needn't match the quickget installed here.
+// on this machine, is left alone. Unpacked files get the seed's own date, so
+// they're refreshed once that's a week old, like any other cached data.
 func Unpack(cacheDir string) error {
 	return unpack(data, cacheDir)
 }
@@ -66,11 +62,7 @@ func unpack(fsys fs.FS, cacheDir string) error {
 		if err != nil || d.IsDir() || !isData(name) {
 			return err
 		}
-		mtime := made
-		if name == CatalogFile {
-			mtime = time.Unix(0, 0)
-		}
-		if err := unpackFile(root, name, filepath.Join(cacheDir, filepath.FromSlash(name)), made, mtime); err != nil {
+		if err := unpackFile(root, name, filepath.Join(cacheDir, filepath.FromSlash(name)), made); err != nil {
 			errs = append(errs, err)
 		}
 		return nil
@@ -84,7 +76,7 @@ func isData(name string) bool {
 	return name == CatalogFile || path.Dir(name) == ReleaseDatesDir && path.Ext(name) == ".json"
 }
 
-func unpackFile(root fs.FS, name, dest string, made, mtime time.Time) error {
+func unpackFile(root fs.FS, name, dest string, made time.Time) error {
 	want, err := fs.ReadFile(root, name)
 	if err != nil {
 		return err
@@ -107,7 +99,7 @@ func unpackFile(root fs.FS, name, dest string, made, mtime time.Time) error {
 	_, werr := tmp.Write(want)
 	cerr := tmp.Close()
 	if werr == nil && cerr == nil {
-		werr = os.Chtimes(tmp.Name(), mtime, mtime)
+		werr = os.Chtimes(tmp.Name(), made, made)
 	}
 	if werr == nil && cerr == nil {
 		werr = os.Rename(tmp.Name(), dest)
