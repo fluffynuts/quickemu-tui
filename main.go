@@ -191,6 +191,7 @@ func main() {
 		opts.ConfigPath = path
 		if cfg, err := config.Load(path); err == nil && cfg != nil {
 			opts.Defaults = cfg.DefaultConf
+			opts.SSHUser = cfg.SSHUser
 		} else if err != nil {
 			fmt.Fprintln(os.Stderr, "quickemu-tui: ignoring unreadable config:", err)
 		}

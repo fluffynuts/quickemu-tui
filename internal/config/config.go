@@ -16,6 +16,9 @@ type Config struct {
 	// DefaultConf are `key="value"` lines merged into new VMs' .conf files, and
 	// into existing ones (for keys they don't set) when the VM is started.
 	DefaultConf []string `json:"default_conf,omitempty"`
+
+	// SSHUser is the user last SSHed into a guest as; it pre-fills the next prompt.
+	SSHUser string `json:"ssh_user,omitempty"`
 }
 
 // Path returns the config file location (<user config dir>/quickemu-tui/config.json).

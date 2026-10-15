@@ -61,6 +61,7 @@ type Options struct {
 	CachePath  string   // where the installable-systems list is cached; empty disables caching
 	ConfigPath string   // user config file; empty if there is nowhere to save settings
 	Defaults   []string // default .conf lines, merged into VMs (see qemu.MergeDefaults)
+	SSHUser    string   // user last SSHed in as; empty means the current user
 	Version    string   // shown in the header's top-right corner; empty hides it
 }
 
@@ -1008,10 +1009,11 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		conf := vm.ConfPath
-		return m, m.askPrompt("SSH into "+vm.Name()+" as user", "Connect", os.Getenv("USER"), func(m *Model, user string) tea.Cmd {
+		return m, m.askPrompt("SSH into "+vm.Name()+" as user", "Connect", m.sshUserDefault(), func(m *Model, user string) tea.Cmd {
 			if user == "" {
 				return nil
 			}
+			m.rememberSSHUser(user)
 			c := exec.Command("ssh", "-p", strconv.Itoa(port), user+"@localhost")
 			return tea.ExecProcess(c, func(err error) tea.Msg {
 				return execDoneMsg{label: "ssh session", conf: conf, err: err}
