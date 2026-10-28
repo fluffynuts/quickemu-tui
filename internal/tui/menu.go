@@ -34,8 +34,13 @@ func (m Model) menuItems() []menuItem {
 
 	noSnap := len(m.snapshots(vm)) == 0
 
+	startItem := menuItem{key: "s", label: "Start", disabled: up}
+	if up && !info.spice.IsZero() {
+		startItem = menuItem{key: "s", label: "Open SPICE viewer"}
+	}
+
 	return []menuItem{
-		{key: "s", label: "Start", disabled: up},
+		startItem,
 		{key: "p", label: "Shut down (ACPI)", disabled: !info.status.IsUp()},
 		{key: "K", label: "Force stop", disabled: !up},
 

@@ -198,6 +198,11 @@ func (m Model) mouseQuickSettings(msg tea.MouseMsg, wheel int) (tea.Model, tea.C
 		qs.gl = !qs.gl
 		return m, nil
 	}
+	if wheel == 0 && py == l.glY+1 {
+		qs.group = qsSpice
+		qs.spice = !qs.spice
+		return m, nil
+	}
 	for g := range qsGroups {
 		at, width := l.at[g], lipgloss.Width(strings.Join(l.cols[g], "\n"))
 		if px < at.x || px >= at.x+width || py < at.y || py >= at.y+len(l.cols[g]) {

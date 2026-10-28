@@ -33,7 +33,7 @@ DIST_NAME   := $(BINARY)-$(FULL_VERSION)-$(PLATFORM)-$(GOARCH)
 SOURCES := $(shell find . -name '*.go' -not -path './vendor/*') go.mod \
 	$(shell find internal/seed/data 2>/dev/null)
 
-.PHONY: all build test vet fmt tidy run install uninstall clean dist seed
+.PHONY: all build test vet fmt fmtcheck tidy run install uninstall clean dist seed
 
 all: build
 
@@ -53,6 +53,13 @@ vet:
 
 fmt:
 	$(GO) fmt ./...
+
+# Fails, naming the files, if any isn't gofmt-formatted; CI runs this.
+fmtcheck:
+	@unformatted=$$(gofmt -l .); \
+	if [ -n "$$unformatted" ]; then \
+		echo "not gofmt-formatted (run make fmt):"; echo "$$unformatted"; exit 1; \
+	fi
 
 tidy:
 	$(GO) mod tidy

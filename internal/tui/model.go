@@ -71,6 +71,7 @@ type vmInfo struct {
 	conf   map[string]string
 	paths  qemu.Paths
 	ports  map[string]int
+	spice  qemu.SpiceTarget // where the running qemu serves SPICE, if it does
 	err    error
 }
 
@@ -195,6 +196,15 @@ type mediaMsg struct {
 	err     error
 }
 
+// viewerExitedMsg is a SPICE viewer ending; err is set when it failed rather
+// than being closed by the user.
+type viewerExitedMsg struct {
+	vm      qemu.VM
+	viewer  string
+	logFrom int64 // where this viewer's output starts in the viewer log
+	err     error
+}
+
 type execDoneMsg struct {
 	label string
 	conf  string
@@ -296,6 +306,9 @@ func gatherCmd(vms []qemu.VM) tea.Cmd {
 				info.paths, info.err = vm.Paths()
 			}
 			info.ports = qemu.ReadPorts(vm)
+			if info.status.IsUp() {
+				info.spice, _ = qemu.RunningSpice(vm)
+			}
 			infos[vm.ConfPath] = info
 		}
 		return infoMsg(infos)
@@ -469,6 +482,26 @@ func (m *Model) startVM(vm qemu.VM) tea.Cmd {
 		func() tea.Msg { return launchExitedMsg{conf: conf, err: cmd.Wait()} },
 		tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg { return pollNowMsg{} }),
 	)
+}
+
+// openSpiceViewer attaches a SPICE viewer to the running vm: closing a viewer
+// leaves the VM running, and quickemu has no way to open another.
+func (m *Model) openSpiceViewer(vm qemu.VM, target qemu.SpiceTarget) tea.Cmd {
+	viewer, err := qemu.FindSpiceViewer()
+	if err != nil {
+		m.setFlash(err.Error(), true)
+		return nil
+	}
+	cmd, logFrom, err := qemu.StartViewer(vm, viewer, target)
+	if err != nil {
+		m.setFlash("Opening a viewer on "+vm.Name()+" failed: "+firstLine(err.Error()), true)
+		m.showError("Opening a viewer on "+vm.Name()+" failed", err.Error())
+		return nil
+	}
+	m.setFlash("Opened "+filepath.Base(viewer)+" on "+vm.Name(), false)
+	return func() tea.Msg {
+		return viewerExitedMsg{vm: vm, viewer: filepath.Base(viewer), logFrom: logFrom, err: cmd.Wait()}
+	}
 }
 
 // askPrompt asks for a line of text, starting from initial. Enter, or
@@ -681,6 +714,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.mediaCursor = clamp(m.mediaCursor, 0, len(m.media)-1)
+		return m, nil
+
+	case viewerExitedMsg:
+		if msg.err != nil {
+			detail := msg.err.Error()
+			if p, err := msg.vm.Paths(); err == nil {
+				if out := qemu.ReadFrom(p.ViewerLog, msg.logFrom); out != "" {
+					detail = out
+				}
+			}
+			m.setFlash(msg.viewer+" on "+msg.vm.Name()+" failed: "+firstLine(detail), true)
+			m.showError(msg.viewer+" on "+msg.vm.Name()+" failed", detail)
+		}
 		return m, nil
 
 	case execDoneMsg:
@@ -936,6 +982,9 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 
 	switch key {
 	case "s":
+		if up && !info.spice.IsZero() {
+			return m, m.openSpiceViewer(vm, info.spice)
+		}
 		if up {
 			m.setFlash(vm.Name()+" is already running", true)
 			return m, nil

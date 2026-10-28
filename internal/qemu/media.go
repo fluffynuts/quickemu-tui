@@ -100,7 +100,8 @@ func monitorExpectSilence(v VM, command string) error {
 	return nil
 }
 
-var portRe = regexp.MustCompile(`^\s*([A-Za-z][\w-]*)\D*?(\d{2,5})\b`)
+// the port must be the whole value: a socket path ("unix,vm/vm.sock") isn't one
+var portRe = regexp.MustCompile(`^\s*([A-Za-z][\w-]*)\s*[,:=]?\s*(\d{2,5})\s*$`)
 
 // ParsePorts reads quickemu's <name>.ports file (lines like "ssh,22220").
 func ParsePorts(text string) map[string]int {

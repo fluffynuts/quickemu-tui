@@ -51,15 +51,21 @@ func (s Status) IsUp() bool {
 // against PID reuse after quickemu left a stale pid file behind) and when it
 // started (zero if that can't be told). See proc_*.go for each OS.
 func qemuProcess(pidFile string) (started time.Time, alive bool) {
-	data, err := os.ReadFile(pidFile)
-	if err != nil {
-		return time.Time{}, false
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
+	pid, ok := readPid(pidFile)
+	if !ok {
 		return time.Time{}, false
 	}
 	return processInfo(pid)
+}
+
+// readPid is the pid in pidFile, if there is a sensible one.
+func readPid(pidFile string) (int, bool) {
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	return pid, err == nil && pid > 0
 }
 
 func started(pidFile string) time.Time {

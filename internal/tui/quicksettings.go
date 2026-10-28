@@ -12,14 +12,15 @@ import (
 
 // The quick settings dialog has single-select groups for CPUs and memory,
 // offering the same choices as those steps of a new install, and for the
-// display, then a checkbox for gl.
+// display, then checkboxes for gl and spice.
 const (
 	qsCPU = iota
 	qsRAM
 	qsDisplay
 	qsGroups
 	qsGL      = qsGroups // focus index of the gl checkbox, after the groups
-	qsFocuses = qsGL + 1
+	qsSpice   = qsGL + 1
+	qsFocuses = qsSpice + 1
 )
 
 var qsTitles = [qsGroups]string{"CPUs", "Memory", "Display"}
@@ -41,6 +42,8 @@ type quickSettings struct {
 	gl     bool
 	glWas  bool
 	glHint string
+	// spice is whether display is "spice"; spiceWas is what the .conf said
+	spice, spiceWas bool
 }
 
 func (m *Model) openQuickSettings(vm qemu.VM) {
@@ -58,6 +61,8 @@ func (m *Model) openQuickSettings(vm qemu.VM) {
 	}
 	qs.gl, qs.glHint = m.glSetting(conf["gl"])
 	qs.glWas = qs.gl
+	qs.spice = conf["display"] == "spice"
+	qs.spiceWas = qs.spice
 	m.qs = qs
 	m.mode = modeQuickSettings
 }
@@ -158,11 +163,14 @@ func (m Model) handleQuickSettingsKey(key string) (tea.Model, tea.Cmd) {
 	case "shift+tab", "left", "h":
 		qs.group = (g + qsFocuses - 1) % qsFocuses
 	case " ", "x":
-		if g == qsGL {
+		switch g {
+		case qsGL:
 			qs.gl = !qs.gl
+		case qsSpice:
+			qs.spice = !qs.spice
 		}
 	}
-	if g == qsGL {
+	if g >= qsGroups {
 		return m, nil
 	}
 	switch key {
@@ -202,6 +210,13 @@ func (m Model) saveQuickSettings() (tea.Model, tea.Cmd) {
 		// written out even when it matches a default, which the user could change
 		set = append(set, `gl="`+onOff(qs.gl)+`"`)
 	}
+	if qs.spice != qs.spiceWas {
+		if qs.spice {
+			set = append(set, `display="spice"`)
+		} else {
+			unset = append(unset, "display")
+		}
+	}
 	if len(set)+len(unset) == 0 {
 		return m, nil
 	}
@@ -210,9 +225,9 @@ func (m Model) saveQuickSettings() (tea.Model, tea.Cmd) {
 		m.showError("Saving "+qs.vm.Name()+"'s settings failed", err.Error())
 		return m, nil
 	}
-	m.setFlash(fmt.Sprintf("%s: CPUs %s, memory %s, display %s, gl %s (applies on next start)",
+	m.setFlash(fmt.Sprintf("%s: CPUs %s, memory %s, display %s, gl %s, spice %s (applies on next start)",
 		qs.vm.Name(), or(qs.picked(qsCPU), "auto"), or(qs.picked(qsRAM), "auto"),
-		or(qs.picked(qsDisplay), "auto"), onOff(qs.gl)), false)
+		or(qs.picked(qsDisplay), "auto"), onOff(qs.gl), onOff(qs.spice)), false)
 	return m, m.pollNow()
 }
 
@@ -267,7 +282,7 @@ func (m Model) qsLayout() qsLayout {
 func (m Model) viewQuickSettings() string {
 	qs := m.qs
 	l := m.qsLayout()
-	canvas := make([]string, l.glY+5)
+	canvas := make([]string, l.glY+7)
 	copy(canvas, []string{
 		titleStyle.Render("Quick settings: " + qs.vm.Name()),
 		"",
@@ -280,8 +295,9 @@ func (m Model) viewQuickSettings() string {
 		}
 	}
 	canvas[l.glY] = qs.viewGL()
-	canvas[l.glY+2] = button(qsButton)
-	canvas[l.glY+4] = dimStyle.Render("↑↓ choose • space tick • tab/←→ switch • enter/esc save and close")
+	canvas[l.glY+1] = qs.viewSpice()
+	canvas[l.glY+3] = button(qsButton)
+	canvas[l.glY+5] = dimStyle.Render("↑↓ choose • space tick • tab/←→ switch • enter/esc save and close")
 	return strings.Join(canvas, "\n")
 }
 
@@ -296,6 +312,25 @@ func (qs quickSettings) viewGL() string {
 		hint = "changed"
 	}
 	if qs.group == qsGL {
+		return selStyle.Render(row) + "  " + dimStyle.Render(hint)
+	}
+	return row + "  " + dimStyle.Render(hint)
+}
+
+func (qs quickSettings) viewSpice() string {
+	box := "[ ]"
+	if qs.spice {
+		box = "[x]"
+	}
+	row := " " + box + " SPICE display (display=spice) "
+	hint := ""
+	switch {
+	case qs.spice != qs.spiceWas:
+		hint = "changed"
+	case qs.spice:
+		hint = "start a running VM again to reopen the viewer"
+	}
+	if qs.group == qsSpice {
 		return selStyle.Render(row) + "  " + dimStyle.Render(hint)
 	}
 	return row + "  " + dimStyle.Render(hint)

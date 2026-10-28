@@ -260,6 +260,9 @@ func (m Model) detailHead(vm qemu.VM, inner int) []string {
 		row("cpu/ram", or(info.conf["cpu_cores"], "auto")+" cores, "+or(info.conf["ram"], "auto")+" RAM")
 		row("display", or(info.conf["display"], "default")+", gl "+or(info.conf["gl"], "default"))
 		row("on disk", m.footprintSummary(vm))
+		if !info.spice.IsZero() && info.status.IsUp() {
+			row("spice", "s to open a viewer")
+		}
 		if port, ok := info.ports["ssh"]; ok && info.status.IsUp() {
 			row("ssh", fmt.Sprintf("localhost:%d (x to connect)", port))
 		}

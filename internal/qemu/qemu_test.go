@@ -33,15 +33,15 @@ func TestParseConf(t *testing.T) {
 
 func TestUnquoteValue(t *testing.T) {
 	cases := map[string]string{
-		`"abc"`:        "abc",
-		`'a b'`:        "a b",
-		`16G # c`:      "16G",
-		`"x"'y'z`:      "xyz",
-		`"a\$b"`:       "a$b",
-		`"a\nb"`:       `a\nb`, // \n isn't an escape inside bash double quotes
-		`a\ b`:         "a b",
-		``:             "",
-		`"unbalanced`:  `"unbalanced`,
+		`"abc"`:         "abc",
+		`'a b'`:         "a b",
+		`16G # c`:       "16G",
+		`"x"'y'z`:       "xyz",
+		`"a\$b"`:        "a$b",
+		`"a\nb"`:        `a\nb`, // \n isn't an escape inside bash double quotes
+		`a\ b`:          "a b",
+		``:              "",
+		`"unbalanced`:   `"unbalanced`,
 		`"$HOME/x.iso"`: "$HOME/x.iso",
 	}
 	for raw, want := range cases {
@@ -236,6 +236,13 @@ func TestParsePorts(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 	if got := ParsePorts("ssh: 22220"); got["ssh"] != 22220 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestParsePortsIgnoresASocketPathWithDigitsInIt(t *testing.T) {
+	got := ParsePorts("ssh,22220\nunix,windows-11/windows-11.sock\nunix,/tmp/vm/x11\n")
+	if !reflect.DeepEqual(got, map[string]int{"ssh": 22220}) {
 		t.Fatalf("got %v", got)
 	}
 }

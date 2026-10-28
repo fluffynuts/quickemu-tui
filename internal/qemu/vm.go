@@ -54,6 +54,7 @@ type Paths struct {
 	LaunchScript  string
 	QuickemuLog   string
 	LaunchLog     string // our own capture of quickemu's stdout/stderr
+	ViewerLog     string // our own capture of the SPICE viewer's output
 }
 
 // Paths derives quickemu's file locations, following disk_img like quickemu does.
@@ -78,6 +79,7 @@ func (v VM) Paths() (Paths, error) {
 		LaunchScript:  filepath.Join(vmDir, name+".sh"),
 		QuickemuLog:   filepath.Join(vmDir, name+".log"),
 		LaunchLog:     filepath.Join(vmDir, name+".tui-launch.log"),
+		ViewerLog:     filepath.Join(vmDir, name+".tui-viewer.log"),
 	}, nil
 }
 
