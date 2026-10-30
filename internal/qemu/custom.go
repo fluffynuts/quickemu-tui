@@ -434,15 +434,7 @@ func download(ctx context.Context, rawURL, part string, progress func(InstallPro
 			progress(p)
 		}
 	}
-	var total int64
-	stopPolling := pollSize(ctx, part, sizePollInterval, func(n int64) {
-		if total == 0 {
-			if data, err := os.ReadFile(headers); err == nil {
-				total = totalFromHeaders(string(data))
-			}
-		}
-		report(InstallProgress{Percent: -1, Bytes: n, Total: total})
-	})
+	stopPolling := pollTransfer(ctx, sizePollInterval, func() (string, string) { return part, headers }, report)
 	output, startErr, waitErr := runScanned(ctx, cmd, func(p InstallProgress) {
 		switch {
 		case strings.HasPrefix(p.Line, finalMarker):
@@ -513,28 +505,64 @@ func totalFromHeaders(headers string) int64 {
 	return total
 }
 
-// pollSize calls report with the size of the file at path every interval until
-// the returned func is called, which waits for any report in progress. It
-// reports even when the size hasn't changed, so that a stall shows as one.
-func pollSize(ctx context.Context, path string, interval time.Duration, report func(int64)) (stop func()) {
+// pollTransfer reports, every interval until the returned func is called, how
+// far the download that where names has got: the file it is writing, and the
+// file its response headers are dumped in. A report says the file's size
+// and, once the headers give it, the size of the whole; it's made even when
+// nothing has changed, so that a stall shows as one. Where names no file, an
+// earlier download has finished, which is reported once as Idle. The func
+// returned waits for any report in progress.
+func pollTransfer(ctx context.Context, interval time.Duration, where func() (file, headers string), report func(InstallProgress)) (stop func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		tick := time.NewTicker(interval)
 		defer tick.Stop()
+		var current string
+		var total int64
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-tick.C:
-				if st, err := os.Stat(path); err == nil {
-					report(st.Size())
+			}
+			file, headers := where()
+			if file == "" {
+				if current != "" {
+					current, total = "", 0
+					report(InstallProgress{Percent: -1, Idle: true})
+				}
+				continue
+			}
+			if file != current {
+				current, total = file, 0
+			}
+			st, err := os.Stat(file)
+			if err != nil {
+				continue // not created yet
+			}
+			if total == 0 {
+				if data, err := os.ReadFile(headers); err == nil {
+					total = totalFromHeaders(string(data))
 				}
 			}
+			report(InstallProgress{Percent: -1, Bytes: st.Size(), Total: total, File: file})
 		}
 	}()
 	return func() { cancel(); <-done }
+}
+
+// shimTransfer is where names the download the curl wrapper in dir (see
+// curlShim) is running, if it is running one.
+func shimTransfer(dir string) func() (file, headers string) {
+	return func() (string, string) {
+		data, err := os.ReadFile(filepath.Join(dir, "output"))
+		if err != nil {
+			return "", ""
+		}
+		return strings.TrimSpace(string(data)), filepath.Join(dir, "headers")
+	}
 }
 
 const copyChunk = 1 << 20

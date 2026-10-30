@@ -40,10 +40,12 @@ type installState struct {
 	title                string
 	percent              float64 // -1: quickget isn't reporting one
 	line                 string
-	bytes                int64 // how much has arrived, where reported (see speedText)
-	total                int64 // how much there will be in all, where the server said
-	speed                speedMeter
-	cancelNote           string // what to tell the user after a cancel about starting again
+	bytes                int64      // how much has arrived, where reported (see speedText)
+	total                int64      // how much there will be in all, where the server said
+	file                 string     // the download being measured (a new one starts the measuring again)
+	speed                speedMeter // of bytes: what's known when the file's size is
+	pace                 speedMeter // of curl's percentage, in thousandths: all there is when it isn't
+	cancelNote           string     // what to tell the user after a cancel about starting again
 	started              time.Time
 	msgs                 chan tea.Msg
 	cancel               context.CancelFunc
@@ -536,13 +538,23 @@ func (m Model) onInstallProgress(p installProgressMsg) (tea.Model, tea.Cmd) {
 	if p.Line != "" {
 		m.install.line = p.Line
 	}
+	if p.Idle {
+		m.install.startTransfer("")
+		m.install.percent = -1
+	}
+	if p.File != "" && p.File != m.install.file {
+		m.install.startTransfer(p.File)
+	}
 	if p.Total > 0 {
 		m.install.total = p.Total
 	}
 	// curl's percentage is coarse, so once the server has said how big the whole
-	// thing is, how much has arrived (which is exact) is what shows
-	if p.Percent >= 0 && m.install.total == 0 {
+	// thing is, how much has arrived (which is exact) is what shows. Its 100% says
+	// nothing: curl opens a resumed download with one, and being done shows by
+	// the download finishing.
+	if p.Percent >= 0 && p.Percent < 100 && m.install.total == 0 {
 		m.install.percent = p.Percent
+		m.install.pace.Add(clock(), int64(p.Percent*1000))
 	}
 	if p.Bytes > 0 {
 		m.install.bytes = p.Bytes

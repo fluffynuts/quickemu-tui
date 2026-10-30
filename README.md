@@ -127,14 +127,20 @@ switch it off. Then confirm. `quickget` runs in
 your VM directory and the new VM appears in the list when it finishes.
 
 A progress dialog shows a bar and percentage (parsed from curl's progress
-output). For a custom ISO's download, copy and checksum check it also shows
-the speed (averaged over the last several seconds, and shown once there are
-two seconds of it) and the time left; the header shows the speed too. For a
-download the percentage and the time left come from how much has arrived and
-the total the server's headers give (so they're right after a resume too);
-where the server gives no total, curl's percentage is used, and the time left
-only from the first percent on. A quickget install has only a percentage to go on, so no
-speed. `esc` keeps the download running in the background, with its progress
+output), and for a download, a copy or a checksum check also the speed
+(averaged over the last several seconds, and shown once there are two seconds
+of it) and the time left; the header shows the speed too. For a download the
+percentage and the time left come from how much has arrived and the total the
+server's headers give (so they're right after a resume too). That goes for a
+quickget install as well: the curl wrapper it runs through (below) tells
+quickemu-tui which file each of quickget's downloads is going to and keeps its
+headers, so a new download (quickget fetches more than the image for some
+systems) starts measuring again, and the time left is for the download in
+progress, not unpacking and checking afterwards. Where there is no total (a
+server that sends none) or no file to watch, curl's percentage is used, and
+then there is a time left (from how fast the percentage climbs) but no speed,
+and only from the first percent on. curl's own 100%, which it shows first when
+it resumes, is ignored. `esc` keeps the download running in the background, with its progress
 in the header, and `n` brings the dialog back. `c` cancels; partial downloads
 are kept, so installing the same thing again resumes it. If the connection
 drops or stalls mid-download (e.g. curl's `HTTP/2 stream … was not closed

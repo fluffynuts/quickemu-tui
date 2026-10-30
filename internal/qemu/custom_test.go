@@ -391,21 +391,71 @@ func TestSourceForgeProjectPagesBecomeTheLatestDownload(t *testing.T) {
 	}
 }
 
-func TestPollSizeReportsGrowthAndStallsUntilStopped(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "x.part")
-	writeFile(t, path, "12345")
-	sizes := make(chan int64, 16)
-	stop := pollSize(context.Background(), path, 5*time.Millisecond, func(n int64) { sizes <- n })
-	if got := <-sizes; got != 5 {
-		t.Errorf("first report %d, want 5", got)
+// waitFor reads reports until one satisfies want, failing the test if none does within a few seconds.
+func waitFor(t *testing.T, reports <-chan InstallProgress, what string, want func(InstallProgress) bool) InstallProgress {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case p := <-reports:
+			if want(p) {
+				return p
+			}
+		case <-deadline:
+			t.Fatalf("no report: %s", what)
+		}
 	}
-	if got := <-sizes; got != 5 {
-		t.Errorf("a stalled file was reported as %d, want 5 again", got)
+}
+
+func TestPollTransferReportsSizeAndTotalNoticesANewFileAndGoesIdleWhenThereIsNone(t *testing.T) {
+	dir := t.TempDir()
+	a, b, hdr := filepath.Join(dir, "a"), filepath.Join(dir, "b"), filepath.Join(dir, "headers")
+	var mu sync.Mutex
+	current := ""
+	where := func() (string, string) {
+		mu.Lock()
+		defer mu.Unlock()
+		return current, hdr
 	}
-	writeFile(t, path, "1234567890")
-	for got := <-sizes; got != 10; got = <-sizes {
+	use := func(f string) {
+		mu.Lock()
+		current = f
+		mu.Unlock()
 	}
+	reports := make(chan InstallProgress, 256)
+	stop := pollTransfer(context.Background(), 5*time.Millisecond, where, func(p InstallProgress) { reports <- p })
+	defer stop()
+
+	writeFile(t, a, "12345")
+	writeFile(t, hdr, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n")
+	use(a)
+	p := waitFor(t, reports, "a's size and total", func(p InstallProgress) bool { return p.File == a && p.Total == 100 })
+	if p.Bytes != 5 || p.Percent != -1 {
+		t.Errorf("%+v, want 5 bytes and no percentage of its own", p)
+	}
+	waitFor(t, reports, "a stalled file reported again", func(p InstallProgress) bool { return p.File == a && p.Bytes == 5 })
+	writeFile(t, a, "1234567890")
+	waitFor(t, reports, "a's growth", func(p InstallProgress) bool { return p.File == a && p.Bytes == 10 })
+
+	// the next download: its file isn't there yet, and the last one's headers are gone
+	if err := os.Remove(hdr); err != nil {
+		t.Fatal(err)
+	}
+	use(b)
+	writeFile(t, b, "123")
+	p = waitFor(t, reports, "b", func(p InstallProgress) bool { return p.File == b })
+	if p.Bytes != 3 || p.Total != 0 {
+		t.Errorf("%+v, want 3 bytes and no total carried over from a", p)
+	}
+
+	use("")
+	waitFor(t, reports, "idle", func(p InstallProgress) bool { return p.Idle })
 	stop() // returns only once the poller has exited, so nothing reports after it
+	for len(reports) > 0 {
+		if p := <-reports; p.Idle {
+			t.Error("idle reported twice")
+		}
+	}
 }
 
 func TestDownloadKeepsItsBookkeepingLineOutOfTheProgress(t *testing.T) {
@@ -688,5 +738,102 @@ func TestLimitedBufferStopsTheWriterAtItsLimit(t *testing.T) {
 	}
 	if b.String() != "12345" {
 		t.Errorf("kept %q, want only what fit", b.String())
+	}
+}
+
+func TestInstallReportsHowFarEachQuickgetDownloadHasGotAndHowBigItIs(t *testing.T) {
+	old := sizePollInterval
+	sizePollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { sizePollInterval = old })
+	// curl writing its headers where the wrapper asks, and the file a little at a time
+	fakeCurl(t, `case "$*" in *--continue-at*) ;; *) exit 0 ;; esac
+hdr=$(echo "$*" | sed 's/.*--dump-header \([^ ]*\).*/\1/')
+out=$(echo "$*" | sed 's/.*--output \([^ ]*\).*/\1/')
+printf 'HTTP/1.1 200 OK\r\nContent-Length: 30\r\n\r\n' > "$hdr"
+for i in 1 2 3; do printf '0123456789' >> "$out"; sleep 0.15; done
+exit 0
+`)
+	// quickget's download, then the unpacking and so on that follow it
+	q := fakeQuickget(t, `curl --disable --progress-bar --location --output "$1.iso" --continue-at - -- https://example.com/x.iso || exit 1
+sleep 0.3
+echo ok > "$1-$2.conf"
+`)
+	dir := t.TempDir()
+	var mu sync.Mutex
+	var got []InstallProgress
+	if _, err := Install(context.Background(), q, dir, "bazzite", "latest", "", func(p InstallProgress) {
+		mu.Lock()
+		got = append(got, p)
+		mu.Unlock()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	file := filepath.Join(dir, "bazzite.iso") // the relative --output, made absolute by the wrapper
+	var maxBytes int64
+	sawTotal, sawIdle := false, false
+	for _, p := range got {
+		if p.File == file {
+			maxBytes = max(maxBytes, p.Bytes)
+			sawTotal = sawTotal || p.Total == 30
+		}
+		if p.File != "" && p.File != file {
+			t.Errorf("a report about %q, want %q", p.File, file)
+		}
+		sawIdle = sawIdle || p.Idle
+	}
+	if maxBytes < 20 || !sawTotal {
+		t.Errorf("most bytes reported %d, total of 30 seen %v; want it to follow the download", maxBytes, sawTotal)
+	}
+	if !sawIdle {
+		t.Error("never told the download had finished")
+	}
+}
+
+func TestInstallWithTheRealCurlLearnsTheTotalFromItsHeaders(t *testing.T) {
+	needCurl(t)
+	old := sizePollInterval
+	sizePollInterval = 20 * time.Millisecond
+	t.Cleanup(func() { sizePollInterval = old })
+	const size = 1 << 20
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprint(size))
+		fl := w.(http.Flusher)
+		for sent := 0; sent < size; sent += 128 * 1024 { // slowly, so there's time to poll
+			_, _ = w.Write(make([]byte, 128*1024))
+			fl.Flush()
+			time.Sleep(60 * time.Millisecond)
+		}
+	}))
+	defer srv.Close()
+	q := fakeQuickget(t, `curl --disable --progress-bar --location --output "$1.iso" --continue-at - -- `+srv.URL+`/x.iso || exit 1
+sleep 0.3
+echo ok > "$1-$2.conf"
+`)
+	dir := t.TempDir()
+	var mu sync.Mutex
+	var got []InstallProgress
+	if _, err := Install(context.Background(), q, dir, "bazzite", "latest", "", func(p InstallProgress) {
+		mu.Lock()
+		got = append(got, p)
+		mu.Unlock()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	file := filepath.Join(dir, "bazzite.iso")
+	var maxBytes int64
+	sawTotal, sawIdle := false, false
+	for _, p := range got {
+		if p.File == file {
+			maxBytes = max(maxBytes, p.Bytes)
+			sawTotal = sawTotal || p.Total == size
+		}
+		sawIdle = sawIdle || p.Idle
+	}
+	if !sawTotal || maxBytes < size/2 || !sawIdle {
+		t.Errorf("total seen %v, most bytes %d of %d, idle seen %v", sawTotal, maxBytes, size, sawIdle)
 	}
 }

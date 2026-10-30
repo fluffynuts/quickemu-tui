@@ -129,3 +129,91 @@ func TestAnInstallThatReportsNoBytesShowsNoSpeed(t *testing.T) {
 		t.Errorf("a speed with nothing to base it on:\n%s", view)
 	}
 }
+
+// progressAt feeds one progress report to the install dialog's model, at the given moment.
+func progressAt(t *testing.T, m Model, at time.Time, p qemu.InstallProgress) Model {
+	t.Helper()
+	old := clock
+	clock = func() time.Time { return at }
+	defer func() { clock = old }()
+	next, _ := m.onInstallProgress(installProgressMsg(p))
+	return next.(Model)
+}
+
+func installDialogModel(t *testing.T) Model {
+	t.Helper()
+	m := newInstallModel(t)
+	m.install = &installState{title: "ubuntu", percent: -1, started: t0, msgs: make(chan tea.Msg, 1)}
+	m.mode = modeInstallProgress
+	return m
+}
+
+func TestWithOnlyAPercentageTheTimeLeftComesFromHowFastItClimbs(t *testing.T) {
+	m := installDialogModel(t)
+	for i := 0; i <= 10; i++ { // 1% a second, from 10% to 20%
+		m = progressAt(t, m, t0.Add(time.Duration(i)*time.Second), qemu.InstallProgress{Percent: 10 + float64(i)})
+	}
+	if got := m.install.speedText(); got != "about 1m 20s left" {
+		t.Errorf("got %q, want the 80%% left at 1%% a second, and no speed", got)
+	}
+	if view := ansi.Strip(m.viewInstallProgress()); !strings.Contains(view, "about 1m 20s left") || strings.Contains(view, "/s") {
+		t.Errorf("the dialog:\n%s", view)
+	}
+}
+
+func TestThePercentageTimeLeftWaitsForOnePercentAndForSomethingToAverage(t *testing.T) {
+	m := installDialogModel(t)
+	m = progressAt(t, m, t0, qemu.InstallProgress{Percent: 0.1})
+	m = progressAt(t, m, t0.Add(10*time.Second), qemu.InstallProgress{Percent: 0.6})
+	if got := m.install.speedText(); got != "" {
+		t.Errorf("got %q under one percent", got)
+	}
+	m = progressAt(t, m, t0.Add(20*time.Second), qemu.InstallProgress{Percent: 1.1})
+	if got := m.install.speedText(); got == "" {
+		t.Error("nothing shown at one percent with 20 seconds of data")
+	}
+	var fresh = installDialogModel(t)
+	fresh = progressAt(t, fresh, t0, qemu.InstallProgress{Percent: 40})
+	if got := fresh.install.speedText(); got != "" {
+		t.Errorf("got %q from a single sample", got)
+	}
+}
+
+func TestACompletePercentageFromCurlIsIgnoredWhileDownloading(t *testing.T) {
+	m := installDialogModel(t)
+	m = progressAt(t, m, t0, qemu.InstallProgress{Percent: 40})
+	m = progressAt(t, m, t0.Add(time.Second), qemu.InstallProgress{Percent: 100}) // what curl opens a resumed download with
+	if m.install.percent != 40 {
+		t.Errorf("percent %v, want 40 to stand", m.install.percent)
+	}
+}
+
+func TestANewDownloadStartsMeasuringAgainAndTheEndOfOneClearsIt(t *testing.T) {
+	m := installDialogModel(t)
+	// the first file: 100 MiB of 1000 at 1 MiB/s
+	for i := 0; i <= 5; i++ {
+		m = progressAt(t, m, t0.Add(time.Duration(i)*time.Second), qemu.InstallProgress{Percent: -1, File: "/vm/a.iso", Bytes: int64(95+i) << 20, Total: 1000 << 20})
+	}
+	if got := m.install.speedText(); !strings.HasPrefix(got, "1.0 MiB/s") {
+		t.Fatalf("got %q", got)
+	}
+	// the next is a different file: nothing about the last one carries over
+	m = progressAt(t, m, t0.Add(6*time.Second), qemu.InstallProgress{Percent: -1, File: "/vm/b.msi", Bytes: 1 << 20})
+	if got := m.install.speedText(); got != "" {
+		t.Errorf("got %q for a download only just begun", got)
+	}
+	if m.install.total != 0 || m.install.file != "/vm/b.msi" {
+		t.Errorf("total %d file %q: the last file's total was kept", m.install.total, m.install.file)
+	}
+	// and when it finishes there's no download to speak of
+	for i := 7; i <= 12; i++ {
+		m = progressAt(t, m, t0.Add(time.Duration(i)*time.Second), qemu.InstallProgress{Percent: -1, File: "/vm/b.msi", Bytes: int64(i) << 20, Total: 20 << 20})
+	}
+	if got := m.install.speedText(); got == "" {
+		t.Fatal("no speed while it downloads")
+	}
+	m = progressAt(t, m, t0.Add(13*time.Second), qemu.InstallProgress{Percent: -1, Idle: true})
+	if got := m.install.speedText(); got != "" || m.install.percent != -1 {
+		t.Errorf("speed %q percent %v after the download ended, want neither", got, m.install.percent)
+	}
+}

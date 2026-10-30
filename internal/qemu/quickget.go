@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -287,6 +288,10 @@ type InstallProgress struct {
 	Percent float64 // 0-100, or -1 when quickget isn't reporting a percentage
 	Bytes   int64   // how much has been fetched, copied or checked so far, where that is known (else 0)
 	Total   int64   // how much there will be in all, where the server said (else 0)
+	// File is the file being downloaded, on a report of how far it has got;
+	// Idle says there's no longer one (the download finished, before the next).
+	File string
+	Idle bool
 }
 
 // InstallArgs is quickget's command line for an install.
@@ -318,11 +323,36 @@ var (
 // command carries on from the end of the partial file. Other calls (page
 // scraping, redirect checks) go straight to the real curl.
 const curlShim = `#!/bin/sh
-# quickemu-tui: resume interrupted quickget downloads
+# quickemu-tui: resume interrupted quickget downloads, and say what is being downloaded
 real=%s
 case " $* " in
 *" --continue-at "*) ;;
 *) exec "$real" "$@" ;;
+esac
+# Where the download is going (in "output") and its headers (in "headers") are
+# left beside this script for quickemu-tui's progress dialog, which reads how
+# much has arrived and how much there will be from them.
+dir=$(dirname "$0")
+out=
+prev=
+for arg in "$@"; do
+	case $prev in
+	--output|-o) out=$arg ;;
+	esac
+	prev=$arg
+done
+rm -f "$dir/headers"
+if [ -n "$out" ]; then
+	case $out in
+	/*) ;;
+	*) out="$PWD/$out" ;;
+	esac
+	printf '%%s\n' "$out" > "$dir/output.tmp" && mv "$dir/output.tmp" "$dir/output"
+	trap 'rm -f "$dir/output"' EXIT
+fi
+case " $* " in
+*" --dump-header "*) ;;
+*) set -- --dump-header "$dir/headers" "$@" ;;
 esac
 n=0
 while :; do
@@ -398,15 +428,27 @@ var (
 func Install(ctx context.Context, quickget, dir, os, release, edition string, progress func(InstallProgress)) (string, error) {
 	cmd := exec.CommandContext(ctx, quickget, InstallArgs(os, release, edition)...)
 	cmd.Dir = dir
+	var mu sync.Mutex
+	report := func(p InstallProgress) {
+		mu.Lock()
+		defer mu.Unlock()
+		if progress != nil {
+			progress(p)
+		}
+	}
+	stopPolling := func() {}
 	if shimDir, err := writeCurlShim(); err == nil {
 		defer removeAll(shimDir)
 		cmd.Env = withPathFirst(environ(), shimDir)
+		// how much of each download has arrived, and how much there will be
+		stopPolling = pollTransfer(ctx, sizePollInterval, shimTransfer(shimDir), report)
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // so we can stop curl too
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 	cmd.WaitDelay = 5 * time.Second
 
-	output, startErr, waitErr := runScanned(ctx, cmd, progress)
+	output, startErr, waitErr := runScanned(ctx, cmd, report)
+	stopPolling()
 	if startErr != nil {
 		return "", startErr
 	}

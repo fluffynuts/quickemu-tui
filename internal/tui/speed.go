@@ -51,6 +51,14 @@ func (s speedMeter) Rate() (float64, bool) {
 	return float64(last.bytes-first.bytes) / span.Seconds(), true
 }
 
+// startTransfer is a download of file (or, with "", none) beginning, so that
+// nothing measured about the one before applies to it.
+func (st *installState) startTransfer(file string) {
+	st.file = file
+	st.bytes, st.total = 0, 0
+	st.speed, st.pace = speedMeter{}, speedMeter{}
+}
+
 // speedText is "1.4 MiB/s, about 38m left", or "" while nothing is known.
 // The time left needs to know how much there is in all: the server's own
 // figure when it gave one, else worked out from the percentage (and then not
@@ -59,7 +67,7 @@ func (s speedMeter) Rate() (float64, bool) {
 func (st *installState) speedText() string {
 	rate, ok := st.speed.Rate()
 	if !ok {
-		return ""
+		return st.paceText()
 	}
 	text := qemu.HumanSize(int64(rate)) + "/s"
 	total := float64(st.total)
@@ -70,6 +78,19 @@ func (st *installState) speedText() string {
 		text += ", about " + formatDuration(time.Duration(remaining/rate*float64(time.Second))) + " left"
 	}
 	return text
+}
+
+// paceText is the time left, when all there is to go on is how fast curl's
+// percentage climbs: no speed, and nothing until there is one whole percent.
+// What it says is about the download in progress, which for an install of
+// several (quickget fetches more than the image for some) restarts with each.
+func (st *installState) paceText() string {
+	rate, ok := st.pace.Rate() // thousandths of a percent a second
+	if !ok || rate <= 0 || st.percent < 1 || st.percent >= 100 {
+		return ""
+	}
+	left := time.Duration((100 - st.percent) * 1000 / rate * float64(time.Second))
+	return "about " + formatDuration(left) + " left"
 }
 
 // formatDuration is d as the two largest units it needs: 2d 4h, 5h 41m, 12m 05s, 45s.
