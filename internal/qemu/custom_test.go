@@ -774,12 +774,12 @@ echo ok > "$1-$2.conf"
 	var maxBytes int64
 	sawTotal, sawIdle := false, false
 	for _, p := range got {
-		if p.File == file {
+		if p.File != "" && !sameFile(p.File, file) {
+			t.Errorf("a report about %q, want %q", p.File, file)
+		}
+		if p.File != "" {
 			maxBytes = max(maxBytes, p.Bytes)
 			sawTotal = sawTotal || p.Total == 30
-		}
-		if p.File != "" && p.File != file {
-			t.Errorf("a report about %q, want %q", p.File, file)
 		}
 		sawIdle = sawIdle || p.Idle
 	}
@@ -827,7 +827,7 @@ echo ok > "$1-$2.conf"
 	var maxBytes int64
 	sawTotal, sawIdle := false, false
 	for _, p := range got {
-		if p.File == file {
+		if p.File != "" && sameFile(p.File, file) {
 			maxBytes = max(maxBytes, p.Bytes)
 			sawTotal = sawTotal || p.Total == size
 		}
@@ -836,4 +836,12 @@ echo ok > "$1-$2.conf"
 	if !sawTotal || maxBytes < size/2 || !sawIdle {
 		t.Errorf("total seen %v, most bytes %d of %d, idle seen %v", sawTotal, maxBytes, size, sawIdle)
 	}
+}
+
+// sameFile is whether a and b are the same file however each is spelled: the temp folder is a symlink on macOS
+// (/var is /private/var), and which spelling a shell reports for its working folder depends on the shell.
+func sameFile(a, b string) bool {
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && ra == rb
 }
