@@ -1,6 +1,6 @@
 module github.com/fluffynuts/quickemu-tui
 
-go 1.23.0
+go 1.27.3
 
 require (
 	github.com/charmbracelet/bubbles v0.21.0
