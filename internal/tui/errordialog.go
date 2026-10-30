@@ -27,6 +27,17 @@ func (m Model) errText() string { return m.errBody }
 // showError opens a scrollable dialog with the full text of an error. It
 // returns to whatever was on screen when closed.
 func (m *Model) showError(title, text string) {
+	m.errNotice = false
+	m.openErrDialog(title, text)
+}
+
+// showNotice is showError for something that isn't one.
+func (m *Model) showNotice(title, text string) {
+	m.errNotice = true
+	m.openErrDialog(title, text)
+}
+
+func (m *Model) openErrDialog(title, text string) {
 	if m.mode != modeError {
 		m.errReturn = m.mode
 	}

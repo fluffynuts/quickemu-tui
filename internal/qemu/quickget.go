@@ -285,6 +285,8 @@ func splitProgress(data []byte, atEOF bool) (int, []byte, error) {
 type InstallProgress struct {
 	Line    string  // the latest line of quickget output; empty for pure progress-bar updates
 	Percent float64 // 0-100, or -1 when quickget isn't reporting a percentage
+	Bytes   int64   // how much has been fetched, copied or checked so far, where that is known (else 0)
+	Total   int64   // how much there will be in all, where the server said (else 0)
 }
 
 // InstallArgs is quickget's command line for an install.
@@ -404,10 +406,28 @@ func Install(ctx context.Context, quickget, dir, os, release, edition string, pr
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 	cmd.WaitDelay = 5 * time.Second
 
+	output, startErr, waitErr := runScanned(ctx, cmd, progress)
+	if startErr != nil {
+		return "", startErr
+	}
+	if ctx.Err() != nil {
+		return output, ctx.Err()
+	}
+	if waitErr != nil {
+		return output, fmt.Errorf("quickget %s failed: %v\n\n%s", strings.Join(InstallArgs(os, release, edition), " "), waitErr, output)
+	}
+	return output, nil
+}
+
+// runScanned runs cmd, whose output is read for download progress (curl's
+// bar, as a percentage) and the lines that aren't progress, which are
+// reported as they come and returned (the last few) once it has finished.
+// Failing to start cmd is startErr; cmd failing is waitErr.
+func runScanned(ctx context.Context, cmd *exec.Cmd, progress func(InstallProgress)) (output string, startErr, waitErr error) {
 	pr, pw := io.Pipe()
 	cmd.Stdout, cmd.Stderr = pw, pw
 	if err := cmd.Start(); err != nil {
-		return "", err
+		return "", err, nil
 	}
 
 	var tail []string
@@ -450,18 +470,11 @@ func Install(ctx context.Context, quickget, dir, os, release, edition string, pr
 		}
 	}()
 
-	waitErr := cmd.Wait()
+	waitErr = cmd.Wait()
 	_ = pw.Close()
 	<-scanDone
 
-	output := strings.Join(tail, "\n")
-	if ctx.Err() != nil {
-		return output, ctx.Err()
-	}
-	if waitErr != nil {
-		return output, fmt.Errorf("quickget %s failed: %v\n\n%s", strings.Join(InstallArgs(os, release, edition), " "), waitErr, output)
-	}
-	return output, nil
+	return strings.Join(tail, "\n"), nil, waitErr
 }
 
 var failedOutputRe = regexp.MustCompile(`(?im)^\s*(error|warning)\b|\bcannot\b|\bunable to\b|not a zipfile|\bfailed\b|no such file`)

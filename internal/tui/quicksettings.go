@@ -158,9 +158,9 @@ func (m Model) handleQuickSettingsKey(key string) (tea.Model, tea.Cmd) {
 		return m.interruptQuit()
 	case "esc", "enter", "q":
 		return m.saveQuickSettings()
-	case "tab", "right", "l":
+	case "tab":
 		qs.group = (g + 1) % qsFocuses
-	case "shift+tab", "left", "h":
+	case "shift+tab":
 		qs.group = (g + qsFocuses - 1) % qsFocuses
 	case " ", "x":
 		switch g {
@@ -297,7 +297,7 @@ func (m Model) viewQuickSettings() string {
 	canvas[l.glY] = qs.viewGL()
 	canvas[l.glY+1] = qs.viewSpice()
 	canvas[l.glY+3] = button(qsButton)
-	canvas[l.glY+5] = dimStyle.Render("↑↓ choose • space tick • tab/←→ switch • enter/esc save and close")
+	canvas[l.glY+5] = dimStyle.Render("↑↓ choose • space tick • tab/shift-tab switch • enter/esc save and close")
 	return strings.Join(canvas, "\n")
 }
 

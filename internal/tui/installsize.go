@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -36,6 +37,32 @@ func (m Model) defaultFor(key string) string {
 		}
 	}
 	return ""
+}
+
+// spicyOnPath is whether spicy, which quickemu opens a SPICE display in, is
+// installed; tests replace it.
+var spicyOnPath = func() bool {
+	_, err := exec.LookPath("spicy")
+	return err == nil
+}
+
+// spiceChoices are the .conf lines that give a new VM a SPICE display: it
+// lets the window be scaled to fit the screen, so a guest running at
+// 1920x1080 isn't partly off it. They're offered only where spicy is
+// installed to show it, and never over a display the user's default options
+// already choose.
+func (m Model) spiceChoices() []string {
+	if m.defaultFor("display") != "" || !spicyOnPath() {
+		return nil
+	}
+	return []string{`display="spice"`}
+}
+
+// newVMChoices are the lines every new VM's .conf gets, beating what quickget
+// wrote there and the user's default options: the CPU and memory picked, and
+// SPICE where it's available.
+func (m Model) newVMChoices() []string {
+	return append(m.sizeChoices(), m.spiceChoices()...)
 }
 
 func (m Model) cpuItems() []pickItem {

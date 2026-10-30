@@ -23,6 +23,7 @@ const (
 	stepEdition
 	stepCPU
 	stepRAM
+	stepCustomOptions // the settings screen of a custom ISO, which comes before stepCPU
 )
 
 // pickItem is one row in the install picker.
@@ -39,6 +40,10 @@ type installState struct {
 	title                string
 	percent              float64 // -1: quickget isn't reporting one
 	line                 string
+	bytes                int64 // how much has arrived, where reported (see speedText)
+	total                int64 // how much there will be in all, where the server said
+	speed                speedMeter
+	cancelNote           string // what to tell the user after a cancel about starting again
 	started              time.Time
 	msgs                 chan tea.Msg
 	cancel               context.CancelFunc
@@ -187,6 +192,7 @@ type installDoneMsg struct {
 	added    []string // default options merged into the new VM's .conf
 	mergeErr error
 
+	notes       []string          // things to tell the user about how it went, even on success
 	confs       []string          // the .conf files this install created
 	isoProblems []qemu.ISOProblem // installation images that are missing or not real ISOs
 }
@@ -260,18 +266,35 @@ func (m Model) instItems() []pickItem {
 	if m.instFilter == "" {
 		return items
 	}
-	needle := strings.ToLower(m.instFilter)
 	var out []pickItem
 	for _, it := range items {
-		if strings.Contains(strings.ToLower(it.label+" "+it.hint), needle) {
+		if it.matches(m.instFilter) {
 			out = append(out, it)
 		}
 	}
 	return out
 }
 
-func (m Model) handleInstallPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (it pickItem) matches(filter string) bool {
+	return strings.Contains(strings.ToLower(it.label+" "+it.hint), strings.ToLower(filter))
+}
+
+// pickerItems are the rows the picker shows: instItems, and on the OS step a
+// first row for a custom ISO. That row waits for the list of systems, which
+// is what the picker shows until it has one.
+func (m Model) pickerItems() []pickItem {
 	items := m.instItems()
+	if m.instStep != stepOS || len(m.catalog) == 0 || !customItem().matches(m.instFilter) {
+		return items
+	}
+	return append([]pickItem{customItem()}, items...)
+}
+
+func (m Model) handleInstallPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.instStep == stepCustomOptions {
+		return m.handleCustomOptionsKey(msg)
+	}
+	items := m.pickerItems()
 	switch msg.String() {
 	case "ctrl+c":
 		return m.interruptQuit()
@@ -330,6 +353,9 @@ func (m Model) stepBack() installStep {
 	case stepRAM:
 		return stepCPU
 	case stepCPU:
+		if m.custom.active {
+			return stepCustomOptions
+		}
 		if len(m.catalog.Editions(m.instOS, m.instRelease)) > 0 {
 			return stepEdition
 		}
@@ -344,6 +370,11 @@ func (m Model) pickItem(it pickItem) (tea.Model, tea.Cmd) {
 	m.instFilter, m.instCursor = "", 0
 	switch m.instStep {
 	case stepOS:
+		if it.value == customOSValue {
+			cmd := m.startCustom()
+			return m, cmd
+		}
+		m.custom = customDraft{}
 		m.instOS = it.value
 		m.instStep = stepRelease
 		if len(m.catalog.Releases(it.value)) == 1 { // nothing to choose
@@ -362,6 +393,9 @@ func (m Model) pickItem(it pickItem) (tea.Model, tea.Cmd) {
 		m.instStep = stepRAM
 	case stepRAM:
 		m.instRAM = it.value
+		if m.custom.active {
+			return m.confirmCustom()
+		}
 		return m.confirmInstall()
 	}
 	return m, nil
@@ -387,7 +421,10 @@ func (m Model) confirmInstall() (tea.Model, tea.Cmd) {
 		extra = fmt.Sprintf("\n\nYour %d default option(s) will be added to its .conf.", n)
 	}
 	// back out of the picker only if confirmed; "no" returns to the picker
-	choices := m.sizeChoices()
+	choices := m.newVMChoices()
+	if len(m.spiceChoices()) > 0 {
+		extra += "\n\nIt will use a SPICE display, as spicy is installed (quick settings can change that)."
+	}
 	m.askConfirm(fmt.Sprintf("Download %s and create a VM in %s?\n\n%s\n\nImages can be several GB. Progress is shown while it downloads,\nand a cancelled download can be resumed by installing it again.%s", what, target, m.sizeSummary(), extra), defaultYes, func(m *Model) tea.Cmd {
 		return m.startInstall(name, m.instOS, m.instRelease, edition, choices)
 	})
@@ -499,8 +536,20 @@ func (m Model) onInstallProgress(p installProgressMsg) (tea.Model, tea.Cmd) {
 	if p.Line != "" {
 		m.install.line = p.Line
 	}
-	if p.Percent >= 0 {
+	if p.Total > 0 {
+		m.install.total = p.Total
+	}
+	// curl's percentage is coarse, so once the server has said how big the whole
+	// thing is, how much has arrived (which is exact) is what shows
+	if p.Percent >= 0 && m.install.total == 0 {
 		m.install.percent = p.Percent
+	}
+	if p.Bytes > 0 {
+		m.install.bytes = p.Bytes
+		m.install.speed.Add(clock(), p.Bytes)
+		if m.install.total > 0 {
+			m.install.percent = min(100, float64(p.Bytes)*100/float64(m.install.total))
+		}
 	}
 	return m, waitInstall(m.install)
 }
@@ -514,7 +563,7 @@ func (m Model) onInstallDone(msg installDoneMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case st == nil:
 	case errors.Is(msg.err, context.Canceled):
-		m.setFlash("Install of "+st.title+" cancelled; install it again to resume", true)
+		m.setFlash("Install of "+st.title+" cancelled; "+or(st.cancelNote, "install it again to resume"), true)
 	case msg.err != nil:
 		m.setFlash(st.title+" install failed: "+firstLine(msg.err.Error()), true)
 		m.showError(st.title+" install failed", msg.err.Error())
@@ -543,6 +592,9 @@ func (m *Model) reportInstalled(st *installState, msg installDoneMsg) {
 		m.showError(st.title+" finished with problems", msg.output)
 	default:
 		m.setFlash(st.title+" installed ✓"+defaultsNote(msg.added, msg.mergeErr), msg.mergeErr != nil)
+		if len(msg.notes) > 0 {
+			m.showNotice(st.title+" was created", strings.Join(msg.notes, "\n\n"))
+		}
 	}
 }
 
@@ -574,6 +626,9 @@ var installStepTitles = map[installStep]string{
 }
 
 func (m Model) viewInstallPick() string {
+	if m.instStep == stepCustomOptions {
+		return m.viewCustomOptions()
+	}
 	title := "New VM: choose " + installStepTitles[m.instStep]
 	if m.instStep != stepOS {
 		title = "New VM: " + m.catalog.DisplayName(m.instOS)
@@ -584,19 +639,22 @@ func (m Model) viewInstallPick() string {
 			title += " " + m.instEdition
 		}
 		title += " – choose " + installStepTitles[m.instStep]
+		if m.custom.active {
+			title = "New VM: " + m.custom.iso.Name + " – choose " + installStepTitles[m.instStep]
+		}
 	}
 	lines := []string{titleStyle.Render(title), ""}
 	if len(m.catalog) == 0 {
 		return strings.Join(append(lines, dimStyle.Render("asking quickget what it can install (this can take a while)…")), "\n")
 	}
-	sizing := m.instStep == stepCPU || m.instStep == stepRAM
+	sizing := m.isSizingStep()
 	if sizing {
 		lines = append(lines, m.viewSizeTable()...)
 		lines = append(lines, "")
 	} else {
 		lines = append(lines, "filter: "+m.instFilter+dimStyle.Render("▏"), "")
 	}
-	items := m.instItems()
+	items := m.pickerItems()
 	if len(items) == 0 {
 		lines = append(lines, dimStyle.Render("nothing matches"))
 	}
@@ -618,15 +676,38 @@ func (m Model) viewInstallPick() string {
 		}
 		rows[i] = row
 	}
-	listRows := max(3, min(14, m.height-16))
+	listRows := m.instListRows()
 	help := fmt.Sprintf("%d shown • type to filter • enter select • esc back", len(items))
 	if sizing {
-		listRows = max(3, min(10, m.height-26)) // the table takes room
 		help = "↑↓ select • enter next • esc back"
 	}
 	lines = append(lines, windowAround(rows, cursor, listRows)...)
 	lines = append(lines, "", dimStyle.Render(help))
 	return strings.Join(lines, "\n")
+}
+
+const (
+	progressBackground = "Background"
+	progressCancel     = "Cancel"
+)
+
+func (m Model) isSizingStep() bool { return m.instStep == stepCPU || m.instStep == stepRAM }
+
+// instListRows is how many rows of the picker's list show at once.
+func (m Model) instListRows() int {
+	if m.isSizingStep() {
+		return max(3, min(10, m.height-26)) // the table takes room
+	}
+	return max(3, min(14, m.height-16))
+}
+
+// instListTop is the line of the picker's content on which its rows start:
+// after the title, then the filter or the sizing table, and a blank.
+func (m Model) instListTop() int {
+	if m.isSizingStep() {
+		return 2 + len(m.viewSizeTable()) + 1
+	}
+	return 4
 }
 
 const progressBarWidth = 40
@@ -652,8 +733,12 @@ func (m Model) viewInstallProgress() string {
 	if line == "" {
 		line = "starting quickget…"
 	}
-	lines = append(lines, "", dimStyle.Render(trunc(line, progressBarWidth+8)),
-		dimStyle.Render("elapsed "+time.Since(st.started).Truncate(time.Second).String()),
+	elapsed := "elapsed " + time.Since(st.started).Truncate(time.Second).String()
+	if speed := st.speedText(); speed != "" {
+		elapsed += "   " + speed
+	}
+	lines = append(lines, "", dimStyle.Render(trunc(line, progressBarWidth+8)), dimStyle.Render(elapsed),
+		"", button(progressBackground)+"  "+button(progressCancel),
 		"", dimStyle.Render("esc/b keep running in background • c cancel • n reopens this"))
 	return strings.Join(lines, "\n")
 }
@@ -666,6 +751,9 @@ func (m Model) installHeader() string {
 	s := "  ⬇ " + m.install.title
 	if m.install.percent >= 0 {
 		s += fmt.Sprintf(" %.0f%%", m.install.percent)
+	}
+	if rate, ok := m.install.speed.Rate(); ok {
+		s += " " + qemu.HumanSize(int64(rate)) + "/s"
 	}
 	return warnStyle.Render(s)
 }

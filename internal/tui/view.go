@@ -154,9 +154,12 @@ func (m Model) viewKeys() string {
 	case modeDefaults:
 		keys = "ctrl+s save • esc discard"
 	case modeQuickSettings:
-		keys = "↑↓ choose • space tick • tab/←→ switch • enter/esc save and close"
+		keys = "↑↓ choose • space tick • tab/shift-tab switch • enter/esc save and close"
 	case modeInstallPick:
 		keys = "type to filter • ↑↓ pgup pgdn • enter select • esc back"
+		if m.instStep == stepCustomOptions {
+			keys = "tab/shift-tab setting • ↑↓ change • enter next • esc back"
+		}
 	case modeInstallProgress:
 		keys = "esc keep running in background • c cancel"
 	case modeError:
@@ -392,7 +395,8 @@ func (m Model) viewModal() string {
 	case modePrompt:
 		return modalStyle.Render(titleStyle.Render(m.promptTitle) + "\n\n" + m.input.View() + "\n\n" + button(m.promptButton))
 	case modeConfirm:
-		return modalStyle.Width(max(30, min(70, m.width-4))).Render(m.confirmText + "\n\n" + dimStyle.Render(m.confirmChoices()))
+		return modalStyle.Width(max(30, min(70, m.width-4))).Render(m.confirmText + "\n\n" +
+			button(confirmYes) + "  " + button(confirmNo) + "  " + dimStyle.Render(m.confirmChoices()))
 	case modeMedia:
 		return modalStyle.Render(m.viewMedia())
 	case modeSnapDelete:
@@ -408,12 +412,20 @@ func (m Model) viewModal() string {
 	case modeInstallProgress:
 		return modalStyle.Render(m.viewInstallProgress())
 	case modeError:
+		if m.errNotice {
+			return modalStyle.Padding(0, 1).Render(titleStyle.Render(m.errTitle) + "\n\n" + m.errView.View())
+		}
 		return modalStyle.BorderForeground(lipgloss.Color("9")).Padding(0, 1).Render(errStyle.Render(m.errTitle) + "\n\n" + m.errView.View())
 	case modeLogs:
 		return modalStyle.Padding(0, 1).Render(m.viewLogs())
 	}
 	return ""
 }
+
+const (
+	confirmYes = "Yes"
+	confirmNo  = "No"
+)
 
 // confirmChoices is the y/n hint, with the enter default capitalised.
 func (m Model) confirmChoices() string {

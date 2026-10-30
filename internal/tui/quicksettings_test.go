@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func newQuickSettingsModel(t *testing.T, conf string) (Model, string) {
@@ -191,5 +192,33 @@ func TestQuickSettingsDisplayChoices(t *testing.T) {
 	}
 	if want := "auto 800x600 1024x768 1920x1080 fullscreen"; strings.Join(got, " ") != want {
 		t.Errorf("display choices %q, want %q", strings.Join(got, " "), want)
+	}
+}
+
+func TestQuickSettingsMovesBetweenFieldsWithTabAndShiftTabNotTheSideArrows(t *testing.T) {
+	m, _ := newQuickSettingsModel(t, "a=1\n")
+	m.openMenu()
+	m = typed(m, "Q")
+	for want := qsRAM; want <= qsSpice; want++ {
+		m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyTab})
+		if m.qs.group != want {
+			t.Fatalf("tab: focus %d, want %d", m.qs.group, want)
+		}
+	}
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyTab})
+	if m.qs.group != qsCPU {
+		t.Errorf("tab from the last field: focus %d, want the first", m.qs.group)
+	}
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if m.qs.group != qsSpice {
+		t.Errorf("shift-tab from the first field: focus %d, want the last", m.qs.group)
+	}
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyLeft})
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.qs.group != qsSpice {
+		t.Errorf("left/right moved the focus to %d", m.qs.group)
+	}
+	if v := ansi.Strip(m.viewQuickSettings()); !strings.Contains(v, "tab/shift-tab switch") {
+		t.Errorf("the dialog doesn't say how to switch:\n%s", v)
 	}
 }

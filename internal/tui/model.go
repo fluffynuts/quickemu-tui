@@ -159,11 +159,13 @@ type Model struct {
 	instEdition string
 	instCores   string // "" for auto
 	instRAM     string // e.g. "8G"; "" for auto
+	custom      customDraft
 	host        hostInfo
 	install     *installState
 
 	errTitle  string
 	errReturn mode
+	errNotice bool // the dialog is information, not an error
 	errBody   string
 	errView   viewport.Model
 

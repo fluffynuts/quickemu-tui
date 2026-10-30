@@ -32,7 +32,16 @@ func newInstallModel(t *testing.T) Model {
 	m.width, m.height = 100, 40
 	m.catalog = cat
 	fakeHost(t, 16, 32<<30)
+	withSpicy(t, false) // whether the machine running the tests has spicy mustn't matter
 	return m
+}
+
+// withSpicy makes the install flows see spicy as installed, or not.
+func withSpicy(t *testing.T, installed bool) {
+	t.Helper()
+	old := spicyOnPath
+	spicyOnPath = func() bool { return installed }
+	t.Cleanup(func() { spicyOnPath = old })
 }
 
 // fakeHost makes the CPU and memory steps see a machine with cpus logical

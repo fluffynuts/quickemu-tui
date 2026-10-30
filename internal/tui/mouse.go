@@ -18,8 +18,10 @@ import (
 // choice or ticks the checkbox, and clicking outside saves and closes, like
 // esc. The wheel moves through whatever list is under it, and elsewhere stands
 // in for ↑/↓. Every dialog has a close button ([x] in its top border) that
-// does what esc does there, and prompts and quick settings have a button
-// ([ Save ] etc.) that does what enter does.
+// does what esc does there, and those that ask something have buttons
+// ([ Save ], [ Yes ] [ No ] etc.) that press the key they stand for. In the
+// install picker a click on a row chooses it, and on the custom ISO settings a
+// click on a row selects it, and on its ‹ or › changes it.
 
 // modal content starts inside modalStyle's border and padding
 const (
@@ -44,8 +46,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.mode != modeNormal && wheel == 0 && m.onCloseButton(msg) {
 		return m.closeDialog()
 	}
-	if wheel == 0 && m.onDialogButton(msg) {
-		return m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if wheel == 0 {
+		if key, ok := m.clickedDialogButton(msg); ok {
+			return m.Update(key)
+		}
 	}
 	switch m.mode {
 	case modeNormal:
@@ -54,6 +58,18 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m.mouseMenu(msg, wheel)
 	case modeQuickSettings:
 		return m.mouseQuickSettings(msg, wheel)
+	case modeInstallPick:
+		if wheel == 0 {
+			return m.mouseInstallPick(msg)
+		}
+		if m.instStep == stepCustomOptions {
+			// ↑↓ would change what a row says, which a stray wheel mustn't
+			key := tea.KeyMsg{Type: tea.KeyTab}
+			if wheel < 0 {
+				key = tea.KeyMsg{Type: tea.KeyShiftTab}
+			}
+			return m.Update(key)
+		}
 	}
 	if wheel != 0 {
 		key := tea.KeyMsg{Type: tea.KeyDown}
@@ -114,35 +130,57 @@ func (m Model) onCloseButton(msg tea.MouseMsg) bool {
 	return msg.Y == y && msg.X >= left && msg.X < left+lipgloss.Width(closeButton)
 }
 
-// dialogButton is the label of the open dialog's button, which does what
-// enter does there; empty if it has none.
-func (m Model) dialogButton() string {
-	switch m.mode {
-	case modePrompt:
-		return m.promptButton
-	case modeQuickSettings:
-		return qsButton
-	}
-	return ""
+// dialogButton is a button a dialog draws; clicking it presses key.
+type dialogButton struct {
+	label string
+	key   tea.KeyMsg
 }
 
-func (m Model) onDialogButton(msg tea.MouseMsg) bool {
-	label := m.dialogButton()
-	if label == "" {
-		return false
+func runeKey(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
+
+// dialogButtons are the buttons the open dialog draws, if any.
+func (m Model) dialogButtons() []dialogButton {
+	enter := tea.KeyMsg{Type: tea.KeyEnter}
+	switch m.mode {
+	case modePrompt:
+		return []dialogButton{{m.promptButton, enter}}
+	case modeQuickSettings:
+		return []dialogButton{{qsButton, enter}}
+	case modeConfirm:
+		return []dialogButton{{confirmYes, runeKey('y')}, {confirmNo, runeKey('n')}}
+	case modeInstallProgress:
+		return []dialogButton{{progressBackground, tea.KeyMsg{Type: tea.KeyEsc}}, {progressCancel, runeKey('c')}}
+	case modeInstallPick:
+		if m.instStep == stepCustomOptions {
+			return []dialogButton{{customNextButton, enter}}
+		}
+	}
+	return nil
+}
+
+// clickedDialogButton is the key of the dialog button under the click, if one is.
+func (m Model) clickedDialogButton(msg tea.MouseMsg) (tea.KeyMsg, bool) {
+	buttons := m.dialogButtons()
+	if len(buttons) == 0 {
+		return tea.KeyMsg{}, false
 	}
 	box := m.dialogBox()
 	x, y := m.modalAt(box)
-	text := buttonText(label)
 	lines := strings.Split(ansi.Strip(box), "\n")
-	// the button is below anything typed, so look from the bottom up
-	for i := len(lines) - 1; i >= 0; i-- {
-		if before, _, found := strings.Cut(lines[i], text); found {
-			left := x + ansi.StringWidth(before)
-			return msg.Y == y+i && msg.X >= left && msg.X < left+ansi.StringWidth(text)
+	for _, b := range buttons {
+		text := buttonText(b.label)
+		// a button is below anything typed, so look from the bottom up
+		for i := len(lines) - 1; i >= 0; i-- {
+			if before, _, found := strings.Cut(lines[i], text); found {
+				left := x + ansi.StringWidth(before)
+				if msg.Y == y+i && msg.X >= left && msg.X < left+ansi.StringWidth(text) {
+					return b.key, true
+				}
+				break
+			}
 		}
 	}
-	return false
+	return tea.KeyMsg{}, false
 }
 
 // closeDialog is what esc does in the open dialog, except that the install
@@ -215,6 +253,46 @@ func (m Model) mouseQuickSettings(msg tea.MouseMsg, wheel int) (tea.Model, tea.C
 			qs.cursor[g] = i
 		}
 		return m, nil
+	}
+	return m, nil
+}
+
+// mouseInstallPick handles a click in the install picker: on a row, it
+// chooses it (as enter does); on the custom ISO settings, see mouseCustomOptions.
+func (m Model) mouseInstallPick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	box := m.dialogBox()
+	bx, by := m.modalAt(box)
+	if !inBox(box, bx, by, msg.X, msg.Y) {
+		return m, nil
+	}
+	px, py := msg.X-bx-modalInsetX, msg.Y-by-modalInsetY
+	if m.instStep == stepCustomOptions {
+		return m.mouseCustomOptions(px, py)
+	}
+	items := m.pickerItems()
+	rows := m.instListRows()
+	start := windowStart(len(items), clamp(m.instCursor, 0, len(items)-1), rows)
+	if i := start + py - m.instListTop(); py >= m.instListTop() && i >= start && i < min(len(items), start+rows) {
+		m.instCursor = i
+		return m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	}
+	return m, nil
+}
+
+func (m Model) mouseCustomOptions(px, py int) (tea.Model, tea.Cmd) {
+	row := py - customOptionsTop
+	if row < 0 || row >= customRows {
+		return m, nil
+	}
+	d := &m.custom
+	d.row = row
+	values, _ := customRowChoices(row)
+	left, right := customArrowCols(values[d.choice[row]])
+	switch px {
+	case left:
+		d.choice[row] = clamp(d.choice[row]-1, 0, len(values)-1)
+	case right:
+		d.choice[row] = clamp(d.choice[row]+1, 0, len(values)-1)
 	}
 	return m, nil
 }

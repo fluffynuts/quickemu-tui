@@ -62,15 +62,23 @@ by their respective keys.
 | n | install a new VM with `quickget` (see below) |
 | enter | open the actions menu for the selected VM (↑↓ then enter runs one; esc closes) |
 
+In a dialog with several fields (quick settings, the custom ISO's settings),
+tab and shift-tab move between the fields and ↑↓ change the choice in the one
+you're on; the side arrows aren't used.
+
 The mouse works too: click a VM to select it, and click it again (or
 right-click it) for its actions menu, where clicking an item runs it and
 clicking outside closes it. Clicking a snapshot selects it, quick settings
 takes clicks on its choices and checkbox (clicking outside saves and closes),
 and the wheel scrolls whatever list is under it. Every dialog has a close
 button, `[x]` at the top right, which does what esc does there (the install
-picker closes rather than stepping back). Quick settings and the text prompts
-(snapshot tag, rename, SSH user, image path) also have a button, such as
-`[ Save ]`, that does what enter does. While the TUI has the mouse,
+picker closes rather than stepping back). Dialogs that ask something have
+buttons that press the key they stand for: `[ Save ]` in quick settings, `[ Next ]`
+or similar in the text prompts (snapshot tag, rename, SSH user, image path, the
+custom ISO's questions), `[ Yes ]` and `[ No ]` in every confirmation, and
+`[ Background ]` and `[ Cancel ]` on the install progress dialog. In the
+install picker a click on a row chooses it, and on the custom ISO's settings a
+click on a row selects it and on its `‹` or `›` changes it. While the TUI has the mouse,
 most terminals still select text with shift held; `-no-mouse` turns it off.
 
 The keys below are shortcuts that work **inside the actions menu only**: pressing one is the same as choosing its item.
@@ -112,11 +120,21 @@ about half the host's RAM), or leave either on `auto`, where quickemu sizes the
 VM from the host each time it starts (both steps show quickemu's table, with
 your host's row marked). A choice is written to the new `.conf` as
 `cpu_cores=`/`ram=`, overriding anything quickget wrote there and any default
-option for the same key. Then confirm. `quickget` runs in
+option for the same key. If `spicy` is installed, a new VM (from quickget or a custom ISO) also gets
+`display="spice"`, which lets its window be scaled to fit your screen; it's left
+out if your default options set a `display` of their own, and quick settings can
+switch it off. Then confirm. `quickget` runs in
 your VM directory and the new VM appears in the list when it finishes.
 
 A progress dialog shows a bar and percentage (parsed from curl's progress
-output). `esc` keeps the download running in the background, with its progress
+output). For a custom ISO's download, copy and checksum check it also shows
+the speed (averaged over the last several seconds, and shown once there are
+two seconds of it) and the time left; the header shows the speed too. For a
+download the percentage and the time left come from how much has arrived and
+the total the server's headers give (so they're right after a resume too);
+where the server gives no total, curl's percentage is used, and the time left
+only from the first percent on. A quickget install has only a percentage to go on, so no
+speed. `esc` keeps the download running in the background, with its progress
 in the header, and `n` brings the dialog back. `c` cancels; partial downloads
 are kept, so installing the same thing again resumes it. If the connection
 drops or stalls mid-download (e.g. curl's `HTTP/2 stream … was not closed
@@ -136,6 +154,51 @@ name instead (Windows is the usual offender). If an image is missing or isn't a
 real ISO, a dialog gives its full path, what is wrong with it, and tells you to
 download a genuine ISO and save it at that path (or edit `iso=` in the `.conf`).
 The VM is still created.
+
+### A system quickget doesn't list
+
+The first row of the system list is **Custom ISO…**, for an installation image
+you have, or can name, that quickget doesn't know. It asks for:
+
+1. the image: a file on this machine (`~` works), or an `http(s)` URL. A URL is
+   downloaded with curl, with the same progress dialog, retries and resuming as
+   a quickget install, and redirects are followed: the link a browser's
+   download button uses ("…/distro.iso/download", which redirects to a mirror)
+   works, and the image is named after where the redirects end up. The
+   address of a SourceForge project page becomes that project's latest
+   download. Only `http` and `https` are followed, and an `https` address can't
+be redirected to plain `http`. Whatever arrives must pass for an ISO (a `.img` is exempt), so a
+   web page where the download should be is refused with that explained, and
+   nothing is left to resume. A file is copied, and the original is left where
+   it is (a message says so, and that you may delete it);
+2. a name for the VM, suggested from the file name;
+3. a SHA-256 checksum, optionally: paste the digest, the line from the
+   distro's `SHA256SUMS`, or the address of the checksum file (redirects are
+   followed there too; if it lists several images, the line naming the image
+   is used). It's checked once the image is here, and a mismatch
+   deletes the image and creates no VM. Leaving it blank works, but the
+   confirmation and the finished message say the image wasn't checked;
+4. the system type (`guest_os`), boot mode and disk size, on one screen with
+   `linux`, `efi` and `32G` already chosen (enter accepts them). The system
+   type isn't a label: quickemu picks the virtual hardware from it, and an
+   unknown value quietly gets a generic profile, so only the values quickemu
+   treats specially are offered (not `macos`, which needs more than an ISO).
+   Boot is written as exactly `efi` or `legacy`, because quickemu reads
+   anything without "efi" in it as legacy;
+5. the CPU and memory steps of an ordinary install.
+
+If `<name>/disk.qcow2` already exists (a leftover from a VM whose `.conf` is
+gone), the confirmation warns that the new VM will use it and installing will
+overwrite what's on it, and enter then means no. An image that finished
+downloading is remembered (in `<name>/.quickemu-tui-fetch`) until the VM is
+made, so trying again after a later failure doesn't download it again.
+
+The image goes into `<name>/` beside the new `<name>.conf`, which gets
+`guest_os`, `boot`, `disk_size`, `disk_img` and `iso`, then your CPU and memory
+picks and your default options. A copy is refused if the file isn't a genuine
+ISO or the disk hasn't room for it. An interrupted download is kept as
+`<file>.part` and resumes if you start the same one again. The row appears
+once the list of systems has loaded.
 
 ## Deleting a VM
 
