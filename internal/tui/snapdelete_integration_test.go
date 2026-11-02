@@ -9,13 +9,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/fluffynuts/quickemu-tui/internal/qemu"
+	"github.com/fluffynuts/quickemu-tui/internal/testtool"
 )
 
 // Drives the real menu -> checklist -> confirm flow against a real qcow2 disk.
 func TestDeleteSnapshotsFlowWithRealQemuImg(t *testing.T) {
-	if _, err := exec.LookPath("qemu-img"); err != nil {
-		t.Skip("qemu-img not installed")
-	}
+	testtool.Require(t, "qemu-img")
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "vm.conf"), []byte("guest_os=\"linux\"\n"), 0o644); err != nil {
 		t.Fatal(err)

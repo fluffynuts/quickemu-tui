@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/fluffynuts/quickemu-tui/internal/testtool"
 )
 
 // Exercises the snapshot functions against a real qcow2 disk. Skipped when
 // qemu-img isn't installed.
 func TestSnapshotLifecycleWithRealQemuImg(t *testing.T) {
-	if _, err := exec.LookPath("qemu-img"); err != nil {
-		t.Skip("qemu-img not installed")
-	}
+	testtool.Require(t, "qemu-img")
 	root := t.TempDir()
 	conf := filepath.Join(root, "vm.conf")
 	if err := os.WriteFile(conf, []byte("guest_os=\"linux\"\n"), 0o644); err != nil {

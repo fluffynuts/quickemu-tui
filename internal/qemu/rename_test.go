@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/fluffynuts/quickemu-tui/internal/testtool"
 )
 
 func read(t *testing.T, path string) string {
@@ -174,9 +176,7 @@ func TestRenameUndoesFolderMoveWhenConfCantBeWritten(t *testing.T) {
 }
 
 func TestRenameKeepsSnapshotsWithRealQemuImg(t *testing.T) {
-	if _, err := exec.LookPath("qemu-img"); err != nil {
-		t.Skip("qemu-img not installed")
-	}
+	testtool.Require(t, "qemu-img")
 	root := t.TempDir()
 	write(t, filepath.Join(root, "a.conf"), "guest_os=\"linux\"\ndisk_img=\"a/disk.qcow2\"\n")
 	vm := VM{ConfPath: filepath.Join(root, "a.conf")}

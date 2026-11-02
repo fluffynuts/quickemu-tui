@@ -121,13 +121,21 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      # The snapshot and ISO tests drive the real tools and skip themselves
-      # when they're missing, so give Linux the tools and let them run.
+      # The snapshot, rename and ISO tests drive the real tools. They skip
+      # themselves when a tool is missing, so QUICKEMU_TUI_REQUIRE_TOOLS makes
+      # that a failure for every tool installed here: a broken install must
+      # not quietly turn them into no-ops. genisoimage isn't packaged for macOS.
       - name: Install qemu-img and genisoimage
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq qemu-utils genisoimage
+          echo "QUICKEMU_TUI_REQUIRE_TOOLS=qemu-img,genisoimage" >>"$GITHUB_ENV"
+      - name: Install qemu-img
+        if: runner.os == 'macOS'
+        run: |
+          brew install qemu
+          echo "QUICKEMU_TUI_REQUIRE_TOOLS=qemu-img" >>"$GITHUB_ENV"
       - run: make fmtcheck
       - run: go vet ./...
       - run: go test ./...

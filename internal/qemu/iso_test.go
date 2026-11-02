@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/fluffynuts/quickemu-tui/internal/testtool"
 )
 
 func fakeISO(t *testing.T, path string, sig string) {
@@ -42,10 +44,7 @@ func TestISOProblemFor(t *testing.T) {
 }
 
 func TestGenuineISOFromGenisoimageIsAccepted(t *testing.T) {
-	tool, err := exec.LookPath("genisoimage")
-	if err != nil {
-		t.Skip("genisoimage not installed")
-	}
+	tool := testtool.Require(t, "genisoimage")
 	src := t.TempDir()
 	write(t, filepath.Join(src, "hello.txt"), "hi")
 	iso := filepath.Join(t.TempDir(), "real.iso")
