@@ -94,7 +94,23 @@ func (m Model) ramItems() []pickItem {
 	return items
 }
 
-// sizeChoices are the .conf lines for the CPU and memory picked; auto adds none.
+// installDiskChoices are the disk sizes offered for a quickget install. Any
+// size can be set later with Resize disk.
+var installDiskChoices = []string{"32G", "64G", "128G", "256G", "512G"}
+
+func (m Model) diskItems() []pickItem {
+	hint := "the size quickget sets for this system"
+	if d := m.defaultFor("disk_size"); d != "" {
+		hint = "your default: " + d
+	}
+	items := []pickItem{{value: "", label: "default", hint: hint}}
+	for _, size := range installDiskChoices {
+		items = append(items, pickItem{value: size, label: size})
+	}
+	return items
+}
+
+// sizeChoices are the .conf lines for the CPU, memory and disk size picked; auto and default add none.
 func (m Model) sizeChoices() []string {
 	var lines []string
 	if m.instCores != "" {
@@ -103,12 +119,20 @@ func (m Model) sizeChoices() []string {
 	if m.instRAM != "" {
 		lines = append(lines, `ram="`+m.instRAM+`"`)
 	}
+	if m.instDisk != "" {
+		lines = append(lines, `disk_size="`+m.instDisk+`"`)
+	}
 	return lines
 }
 
 // sizeSummary describes the picks for the confirmation, e.g. "CPUs: 4, memory: auto".
+// A custom ISO's confirmation lists its disk size itself.
 func (m Model) sizeSummary() string {
-	return "CPUs: " + or(m.instCores, "auto") + ", memory: " + or(m.instRAM, "auto")
+	s := "CPUs: " + or(m.instCores, "auto") + ", memory: " + or(m.instRAM, "auto")
+	if !m.custom.active {
+		s += ", disk: " + or(m.instDisk, "default")
+	}
+	return s
 }
 
 // viewAutoTable shows quickemu's sizing table with this host's row marked.
@@ -140,6 +164,12 @@ func viewAutoTable(what string, tiers []qemu.AutoTier, have int, known bool, uni
 }
 
 func (m Model) viewSizeTable() []string {
+	if m.instStep == stepDisk {
+		return []string{
+			dimStyle.Render("default: keep the disk size quickget chooses for this system"),
+			dimStyle.Render("a disk can be resized later: Resize disk, z in the actions menu"),
+		}
+	}
 	if m.instStep == stepCPU {
 		lines := viewAutoTable("CPUs", qemu.AutoCoreTiers, m.host.cpus, true, "")
 		return append(lines, "", fmt.Sprintf("This host has %s.", plural(m.host.cpus, "logical CPU")))

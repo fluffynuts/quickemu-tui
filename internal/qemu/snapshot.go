@@ -116,6 +116,41 @@ func ApplySnapshot(v VM, ref string) error {
 	return snapshotOp(v, "-a", ref)
 }
 
+// RevertResult is what a revert did to the disk's size: reverting restores the
+// size the snapshot was taken at, so a resize made since is undone. A size is 0
+// when it couldn't be read, in which case nothing is claimed about it.
+type RevertResult struct {
+	Before, After int64
+}
+
+// SizeChanged is whether the revert changed the disk's size.
+func (r RevertResult) SizeChanged() bool {
+	return r.Before > 0 && r.After > 0 && r.Before != r.After
+}
+
+// RevertToSnapshot is ApplySnapshot, also reporting the disk's size before and
+// after. Failing to read a size doesn't fail the revert.
+func RevertToSnapshot(v VM, ref string) (RevertResult, error) {
+	var r RevertResult
+	if err := RequireStopped(v); err != nil {
+		return r, err
+	}
+	p, err := v.Paths()
+	if err != nil {
+		return r, err
+	}
+	if info, err := GetDiskInfo(p.Disk); err == nil {
+		r.Before = info.VirtualSize
+	}
+	if err := ApplySnapshot(v, ref); err != nil {
+		return r, err
+	}
+	if info, err := GetDiskInfo(p.Disk); err == nil {
+		r.After = info.VirtualSize
+	}
+	return r, nil
+}
+
 // DeleteSnapshot removes ref. Space is reused inside the qcow2; the file doesn't shrink.
 func DeleteSnapshot(v VM, ref string) error {
 	return snapshotOp(v, "-d", ref)

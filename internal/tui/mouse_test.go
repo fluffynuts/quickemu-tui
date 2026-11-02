@@ -225,6 +225,7 @@ func TestEveryDialogHasAWorkingCloseButton(t *testing.T) {
 		"logs":          {func(m *Model) { m.mode = modeLogs; m.loadLog() }, modeNormal},
 		"snap delete":   {func(m *Model) { m.openSnapDelete(m.vms[0]) }, modeNormal},
 		"snap revert":   {func(m *Model) { m.openSnapRevert(m.vms[0]) }, modeNormal},
+		"resize":        {func(m *Model) { m.openResize(m.vms[0], false) }, modeNormal},
 		"defaults":      {func(m *Model) { m.openDefaults() }, modeNormal},
 		"quick setting": {func(m *Model) { m.openQuickSettings(m.vms[0]) }, modeNormal},
 		"install pick": {func(m *Model) {

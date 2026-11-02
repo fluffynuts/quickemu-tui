@@ -40,6 +40,7 @@ const (
 	modeMenu
 	modeSnapDelete
 	modeSnapRevert
+	modeResize
 	modeError
 	modeInstallPick
 	modeInstallProgress
@@ -140,6 +141,9 @@ type Model struct {
 	revVM     qemu.VM
 	revCursor int
 
+	resVM     qemu.VM // the VM whose disk the resize picker is for
+	resCursor int
+
 	qs quickSettings
 
 	defaults []string
@@ -165,6 +169,7 @@ type Model struct {
 	instEdition string
 	instCores   string // "" for auto
 	instRAM     string // e.g. "8G"; "" for auto
+	instDisk    string // e.g. "64G"; "" for what quickget sets
 	custom      customDraft
 	host        hostInfo
 	install     *installState
@@ -226,6 +231,7 @@ type opDoneMsg struct {
 	refreshDisk  bool
 	refreshMedia bool
 	startAfter   bool
+	note         string // said beside the success message, e.g. a side effect worth knowing about
 	forgetVM     bool   // the VM was deleted: drop what we know about it and rescan
 	selectConf   string // the VM was renamed to this .conf: rescan and select it
 }
@@ -436,6 +442,15 @@ func (m *Model) setFlash(text string, isErr bool) {
 	m.flashErr = isErr
 }
 
+// doneText is the message for a finished operation: its label, a tick, and any note.
+func doneText(msg opDoneMsg) string {
+	text := msg.label + " ✓"
+	if msg.note != "" {
+		text += " " + msg.note
+	}
+	return text
+}
+
 func (m *Model) ensureSpin() tea.Cmd {
 	if m.spinning {
 		return nil
@@ -474,12 +489,18 @@ func (m *Model) rediscover() {
 
 // startOp runs fn in the background and reports back with an opDoneMsg.
 func (m *Model) startOp(label string, vm qemu.VM, after opDoneMsg, fn func() error) tea.Cmd {
+	return m.startOpNote(label, vm, after, func() (string, error) { return "", fn() })
+}
+
+// startOpNote is startOp for an operation that also has something to tell the
+// user when it succeeds.
+func (m *Model) startOpNote(label string, vm qemu.VM, after opDoneMsg, fn func() (note string, err error)) tea.Cmd {
 	m.busy++
 	m.setFlash(label+"…", false)
 	after.label = label
 	after.conf = vm.ConfPath
 	return batch(m.ensureSpin(), func() tea.Msg {
-		after.err = fn()
+		after.note, after.err = fn()
 		return after
 	})
 }
@@ -693,7 +714,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFlash(msg.label+" failed: "+firstLine(msg.err.Error()), true)
 			m.showError(msg.label+" failed", msg.err.Error())
 		} else {
-			m.setFlash(msg.label+" ✓", false)
+			m.setFlash(doneText(msg), false)
 		}
 		renamed := msg.selectConf != "" && msg.err == nil
 		if (msg.forgetVM || renamed) && msg.err == nil {
@@ -719,6 +740,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if msg.startAfter && msg.err == nil {
 				cmds = append(cmds, m.startVM(vm))
+				if msg.note != "" && !m.flashErr { // starting replaced the note; a start failure mustn't be hidden by it
+					m.setFlash(doneText(msg), false)
+				}
 			}
 		}
 		return m, batch(cmds...)
@@ -808,6 +832,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleSnapDeleteKey(msg.String())
 		case modeSnapRevert:
 			return m.handleSnapRevertKey(msg.String())
+		case modeResize:
+			return m.handleResizeKey(msg.String())
 		case modeError:
 			return m.handleErrorKey(msg)
 		case modeInstallPick:
@@ -961,7 +987,7 @@ func (m Model) declineConfirm(answeredNo bool) (tea.Model, tea.Cmd) {
 }
 
 var mutatingKeys = map[string]bool{
-	"s": true, "p": true, "K": true, "c": true, "a": true, "d": true, "e": true, "D": true, "R": true, "Q": true,
+	"s": true, "p": true, "K": true, "c": true, "a": true, "d": true, "e": true, "D": true, "R": true, "Q": true, "z": true,
 }
 
 func (m Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
@@ -1173,6 +1199,10 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.openSnapDelete(vm)
+		return m, nil
+
+	case "z":
+		m.openResize(vm, up)
 		return m, nil
 
 	case "a":

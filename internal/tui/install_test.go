@@ -91,6 +91,7 @@ func TestInstallPickerWalksOSReleaseEdition(t *testing.T) {
 	}
 	m, _ = keyOf(m, enter) // auto CPUs
 	m, _ = keyOf(m, enter) // auto memory
+	m, _ = keyOf(m, enter) // default disk size
 	if m.mode != modeConfirm || m.confirmDefault != defaultYes || !strings.Contains(m.confirmText, "Windows 11 French") {
 		t.Fatalf("mode=%v confirm=%q", m.mode, m.confirmText)
 	}
@@ -131,6 +132,7 @@ func TestInstallShowsProgressAndFinishes(t *testing.T) {
 	}
 	m, _ = keyOf(m, enter) // auto CPUs
 	m, _ = keyOf(m, enter) // auto memory
+	m, _ = keyOf(m, enter) // default disk size
 	if m.mode != modeConfirm {
 		t.Fatalf("mode=%v, want confirm", m.mode)
 	}
@@ -426,7 +428,8 @@ func TestInstallCPUAndMemorySteps(t *testing.T) {
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyDown})
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyDown})
 	m, _ = keyOf(m, enter) // 8G
-	if m.mode != modeConfirm || !strings.Contains(m.confirmText, "CPUs: auto, memory: 8G") {
+	m, _ = keyOf(m, enter) // default disk size
+	if m.mode != modeConfirm || !strings.Contains(m.confirmText, "CPUs: auto, memory: 8G, disk: default") {
 		t.Fatalf("mode=%v confirm=%q", m.mode, m.confirmText)
 	}
 	if got := strings.Join(m.sizeChoices(), " "); got != `ram="8G"` {

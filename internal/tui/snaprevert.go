@@ -52,11 +52,20 @@ func (m Model) confirmSnapRevert(snap qemu.Snapshot, startAfter bool) (tea.Model
 	}
 	m.askConfirm(fmt.Sprintf("%s %s from '%s'? The current disk state is discarded.", verb, vm.Name(), ref), defaultNo, func(m *Model) tea.Cmd {
 		m.mode = modeNormal
-		return m.startOp("Revert to '"+ref+"'", vm, opDoneMsg{refreshDisk: true, startAfter: startAfter}, func() error {
-			return qemu.ApplySnapshot(vm, ref)
+		return m.startOpNote("Revert to '"+ref+"'", vm, opDoneMsg{refreshDisk: true, startAfter: startAfter}, func() (string, error) {
+			result, err := qemu.RevertToSnapshot(vm, ref)
+			return revertNote(result), err
 		})
 	})
 	return m, nil
+}
+
+// revertNote says so when the revert brought back a different disk size.
+func revertNote(r qemu.RevertResult) string {
+	if !r.SizeChanged() {
+		return ""
+	}
+	return fmt.Sprintf("(the disk is now %s, not %s: reverting restores the size the snapshot was taken at)", qemu.HumanSize(r.After), qemu.HumanSize(r.Before))
 }
 
 func (m Model) viewSnapRevert() string {

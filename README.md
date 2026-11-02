@@ -95,6 +95,7 @@ The keys below are shortcuts that work **inside the actions menu only**: pressin
 | --- | --- |
 | s / p / K | start / ACPI shutdown / force stop (`quickemu --kill`, falls back to monitor `quit`); on a running VM that was started with SPICE, `s` opens a SPICE viewer on it again (`spicy`, else `remote-viewer`; Linux only), as closing the viewer leaves the VM running |
 | c / a / d | create snapshot / revert / delete: `a` opens a picker (enter reverts, `s` reverts then starts, both after confirming); `d` opens a checklist (space ticks, `a` ticks all, enter deletes the ticked ones after confirming) |
+| z | resize the disk (VM off): grow it by +10G/+20G/+50G/+100G, or pick *Other size…* and type one: `64G` sets the size, `+20G` adds, `-5G` takes away. A shrink is allowed behind a strong warning, as it destroys what the guest keeps past the new end. Grows leave the guest's partitions alone (an installer uses the new space; an installed system needs them grown inside the guest). Reverting to a snapshot restores the disk size it was taken at, and a revert that changes the size says so. The `.conf`'s `disk_size` is updated to match |
 | m | removable media: swap or eject ISOs on a running VM |
 | Q | quick settings: pick the number of CPUs and the memory (the same choices as a new install, or `auto`), the display (`auto`, 800x600, 1024x768, 1920x1080 or fullscreen), tick OpenGL on or off and tick SPICE display on or off (`display="spice"`, or the key removed); on closing, what changed is written to the `.conf` (`cpu_cores=`/`ram=` set, or removed for `auto`; `width=`/`height=` for a size, or `fullscreen="on"`, which quickemu-tui passes to quickemu as `--fullscreen`; `gl="on"`/`"off"`), applying on the next start |
 | e | edit the `.conf` in `$VISUAL`/`$EDITOR` (nano if unset) |
@@ -126,9 +127,12 @@ a release, and an edition if there is one. Then choose the number of CPUs
 (1 to one less than the host's logical CPUs) and the memory (4G steps up to
 about half the host's RAM), or leave either on `auto`, where quickemu sizes the
 VM from the host each time it starts (both steps show quickemu's table, with
-your host's row marked). A choice is written to the new `.conf` as
-`cpu_cores=`/`ram=`, overriding anything quickget wrote there and any default
-option for the same key. If `spicy` is installed, a new VM (from quickget or a custom ISO) also gets
+your host's row marked). A quickget install then asks for the disk size:
+`default` keeps what quickget sets for that system, or pick 32G to 512G (a
+custom ISO chose its disk size on its own settings screen; any disk can be
+resized later with `z` in the actions menu). A choice is written to the new
+`.conf` as `cpu_cores=`/`ram=`/`disk_size=`, overriding anything quickget wrote
+there and any default option for the same key. If `spicy` is installed, a new VM (from quickget or a custom ISO) also gets
 `display="spice"`, which lets its window be scaled to fit your screen; it's left
 out if your default options set a `display` of their own, and quick settings can
 switch it off. Then confirm. `quickget` runs in

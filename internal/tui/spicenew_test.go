@@ -67,7 +67,7 @@ func installHaiku(t *testing.T, m Model) Model {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	m = typed(m, "haiku")
-	m = press(m, tea.KeyEnter, tea.KeyEnter, tea.KeyEnter) // the system, then auto CPUs and memory
+	m = press(m, tea.KeyEnter, tea.KeyEnter, tea.KeyEnter, tea.KeyEnter) // the system, then auto CPUs, memory and the default disk size
 	if m.mode != modeConfirm {
 		t.Fatalf("mode %v, want the confirmation", m.mode)
 	}

@@ -23,6 +23,7 @@ const (
 	stepEdition
 	stepCPU
 	stepRAM
+	stepDisk          // quickget installs only: a custom ISO chose its disk size on its settings screen
 	stepCustomOptions // the settings screen of a custom ISO, which comes before stepCPU
 )
 
@@ -220,7 +221,7 @@ func (m *Model) openInstall() tea.Cmd {
 	m.instStep = stepOS
 	m.instFilter, m.instCursor = "", 0
 	m.instOS, m.instRelease, m.instEdition = "", "", ""
-	m.instCores, m.instRAM = "", ""
+	m.instCores, m.instRAM, m.instDisk = "", "", ""
 	m.host = readHostInfo()
 	switch {
 	case m.catalogLoading:
@@ -264,6 +265,8 @@ func (m Model) instItems() []pickItem {
 		return m.cpuItems() // short lists: no filtering
 	case stepRAM:
 		return m.ramItems()
+	case stepDisk:
+		return m.diskItems()
 	}
 	if m.instFilter == "" {
 		return items
@@ -330,7 +333,7 @@ func (m Model) handleInstallPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.pickItem(items[clamp(m.instCursor, 0, len(items)-1)])
 	default:
-		if m.instStep == stepCPU || m.instStep == stepRAM {
+		if m.isSizingStep() {
 			return m, nil // nothing to filter
 		}
 		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
@@ -352,6 +355,8 @@ func (m Model) handleInstallPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // nothing to choose.
 func (m Model) stepBack() installStep {
 	switch m.instStep {
+	case stepDisk:
+		return stepRAM
 	case stepRAM:
 		return stepCPU
 	case stepCPU:
@@ -398,6 +403,9 @@ func (m Model) pickItem(it pickItem) (tea.Model, tea.Cmd) {
 		if m.custom.active {
 			return m.confirmCustom()
 		}
+		m.instStep = stepDisk
+	case stepDisk:
+		m.instDisk = it.value
 		return m.confirmInstall()
 	}
 	return m, nil
@@ -634,7 +642,7 @@ func isoReport(title string, problems []qemu.ISOProblem, confs []string) string 
 
 var installStepTitles = map[installStep]string{
 	stepOS: "operating system", stepRelease: "release", stepEdition: "edition",
-	stepCPU: "number of CPUs", stepRAM: "memory",
+	stepCPU: "number of CPUs", stepRAM: "memory", stepDisk: "disk size",
 }
 
 func (m Model) viewInstallPick() string {
@@ -703,7 +711,9 @@ const (
 	progressCancel     = "Cancel"
 )
 
-func (m Model) isSizingStep() bool { return m.instStep == stepCPU || m.instStep == stepRAM }
+func (m Model) isSizingStep() bool {
+	return m.instStep == stepCPU || m.instStep == stepRAM || m.instStep == stepDisk
+}
 
 // instListRows is how many rows of the picker's list show at once.
 func (m Model) instListRows() int {

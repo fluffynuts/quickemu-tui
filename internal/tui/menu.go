@@ -47,6 +47,7 @@ func (m Model) menuItems() []menuItem {
 		{key: "c", label: "Create snapshot", disabled: up, gap: true},
 		{key: "a", label: "Revert to snapshot…", disabled: up || noSnap},
 		{key: "d", label: "Delete snapshot…", disabled: up || noSnap},
+		{key: "z", label: "Resize disk…", disabled: up},
 
 		{key: "m", label: "Removable media…", disabled: !monitorUp, gap: true},
 		{key: "Q", label: "Quick Settings…"},

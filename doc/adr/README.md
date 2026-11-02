@@ -26,3 +26,4 @@ that supersedes the old one rather than rewriting history.
 | [0014](0014-config-and-cache-locations.md) | Where settings and caches live |
 | [0015](0015-releases-versioning-and-self-upgrade.md) | Every push to master is released; `--upgrade` verifies before replacing |
 | [0016](0016-mouse-support-follows-the-drawn-layout.md) | Mouse support maps clicks onto the same layout the views draw |
+| [0017](0017-resizing-a-vms-disk.md) | Resizing a VM's disk: plan, warn, and keep `disk_size` in step |
