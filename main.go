@@ -124,7 +124,7 @@ func ensureVMDir(dir string) error {
 
 // resolveDir returns the VM directory from the config file, asking the user
 // (and saving the answer) on first run. It returns "" if the user cancels.
-func resolveDir(def string) (string, error) {
+func resolveDir(def string, mouse bool) (string, error) {
 	path, err := config.Path()
 	if err != nil {
 		return def, nil // no usable config location: fall back to the default
@@ -136,7 +136,11 @@ func resolveDir(def string) (string, error) {
 	if cfg != nil && cfg.VMDir != "" {
 		return cfg.VMDir, nil
 	}
-	final, err := tea.NewProgram(tui.NewSetup(def)).Run()
+	var programOpts []tea.ProgramOption
+	if mouse {
+		programOpts = append(programOpts, tea.WithMouseCellMotion())
+	}
+	final, err := tea.NewProgram(tui.NewSetup(def), programOpts...).Run()
 	if err != nil {
 		return "", err
 	}
@@ -176,7 +180,7 @@ func main() {
 		*dir = flag.Arg(0)
 	}
 	if !explicit {
-		chosen, err := resolveDir(*dir)
+		chosen, err := resolveDir(*dir, !*noMouse)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "quickemu-tui:", err)
 			os.Exit(1)

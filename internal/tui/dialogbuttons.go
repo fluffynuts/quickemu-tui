@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Every dialog draws its buttons the same way, and they take part in the tab
@@ -86,6 +87,26 @@ func renderButtons(buttons []dialogButton, focus int) string {
 		parts[i] = renderButton(b, i == 0, i == focus)
 	}
 	return strings.Join(parts, "  ")
+}
+
+// buttonIndexAt is which of buttons is drawn under the screen position (px, py),
+// or -1, given the dialog box as drawn with its top left at (bx, by).
+func buttonIndexAt(box string, bx, by int, buttons []dialogButton, px, py int) int {
+	lines := strings.Split(ansi.Strip(box), "\n")
+	for n, b := range buttons {
+		text := buttonText(b.label)
+		// a button is below anything typed, so look from the bottom up
+		for i := len(lines) - 1; i >= 0; i-- {
+			if before, _, found := strings.Cut(lines[i], text); found {
+				left := bx + ansi.StringWidth(before)
+				if py == by+i && px >= left && px < left+ansi.StringWidth(text) {
+					return n
+				}
+				break
+			}
+		}
+	}
+	return -1
 }
 
 // buttonRow is the open dialog's buttons, drawn.

@@ -5,7 +5,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // Mouse support maps a click onto the same layout the views draw, using the
@@ -135,19 +134,8 @@ func (m Model) clickedDialogButton(msg tea.MouseMsg) (dialogButton, bool) {
 	}
 	box := m.dialogBox()
 	x, y := m.modalAt(box)
-	lines := strings.Split(ansi.Strip(box), "\n")
-	for _, b := range buttons {
-		text := buttonText(b.label)
-		// a button is below anything typed, so look from the bottom up
-		for i := len(lines) - 1; i >= 0; i-- {
-			if before, _, found := strings.Cut(lines[i], text); found {
-				left := x + ansi.StringWidth(before)
-				if msg.Y == y+i && msg.X >= left && msg.X < left+ansi.StringWidth(text) {
-					return b, true
-				}
-				break
-			}
-		}
+	if i := buttonIndexAt(box, x, y, buttons, msg.X, msg.Y); i >= 0 {
+		return buttons[i], true
 	}
 	return dialogButton{}, false
 }
