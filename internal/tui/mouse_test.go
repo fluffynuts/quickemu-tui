@@ -165,7 +165,7 @@ func TestQuickSettingsClicks(t *testing.T) {
 	if m.qs.group != qsGL || m.qs.gl {
 		t.Fatalf("group %d, gl %v; want the checkbox unticked", m.qs.group, m.qs.gl)
 	}
-	m = at(m, 0, 1, tea.MouseButtonLeft) // outside: saves and closes
+	m = click(t, m, "[ Save ]", anywhere, tea.MouseButtonLeft)
 	if m.mode != modeNormal {
 		t.Fatalf("mode %v, want closed", m.mode)
 	}
@@ -174,6 +174,20 @@ func TestQuickSettingsClicks(t *testing.T) {
 		if !strings.Contains(string(data), want) {
 			t.Errorf(".conf lacks %s:\n%s", want, data)
 		}
+	}
+}
+
+func TestClickingOutsideQuickSettingsDiscardsWhatWasChanged(t *testing.T) {
+	m := newMouseModel(t, "alpha")
+	before, _ := os.ReadFile(m.vms[0].ConfPath)
+	m.openQuickSettings(m.vms[0])
+	m = click(t, m, "2 cores", anywhere, tea.MouseButtonLeft)
+	m = at(m, 0, 1, tea.MouseButtonLeft)
+	if m.mode != modeNormal {
+		t.Fatalf("mode %v, want closed", m.mode)
+	}
+	if after, _ := os.ReadFile(m.vms[0].ConfPath); string(after) != string(before) {
+		t.Fatalf(".conf changed by a click outside: %q", after)
 	}
 }
 

@@ -190,23 +190,27 @@ func (m Model) handleCustomOptionsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m.interruptQuit()
 	case "esc":
-		m.instStep = stepOS
-		m.custom = customDraft{}
-	case "tab":
-		d.row = (d.row + 1) % customRows
-	case "shift+tab":
-		d.row = (d.row + customRows - 1) % customRows
+		return m.customBack()
 	case "up", "k":
 		values, _ := customRowChoices(d.row)
 		d.choice[d.row] = clamp(d.choice[d.row]-1, 0, len(values)-1)
 	case "down", "j":
 		values, _ := customRowChoices(d.row)
 		d.choice[d.row] = clamp(d.choice[d.row]+1, 0, len(values)-1)
-	case "enter":
-		d.settle()
-		m.instStep = stepCPU
-		m.instFilter, m.instCursor = "", 0
 	}
+	return m, nil
+}
+
+func (m Model) customBack() (tea.Model, tea.Cmd) {
+	m.instStep = stepOS
+	m.custom = customDraft{}
+	return m, nil
+}
+
+func (m Model) customNext() (tea.Model, tea.Cmd) {
+	m.custom.settle()
+	m.instStep = stepCPU
+	m.instFilter, m.instCursor = "", 0
 	return m, nil
 }
 
@@ -243,7 +247,7 @@ func (m Model) viewCustomOptions() string {
 		}
 		lines = append(lines, line+"  "+dimStyle.Render(hints[d.choice[row]]))
 	}
-	return strings.Join(append(lines, "", button(customNextButton), "", dimStyle.Render("tab/shift-tab setting • ↑↓ change • enter next • esc back")), "\n")
+	return strings.Join(append(lines, "", m.buttonRow(), "", dimStyle.Render("tab/shift-tab setting • ↑↓ change • esc back")), "\n")
 }
 
 func (m Model) confirmCustom() (tea.Model, tea.Cmd) {

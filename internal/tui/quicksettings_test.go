@@ -63,9 +63,9 @@ func TestQuickSettingsWritesPicksOnClose(t *testing.T) {
 	m, _ = keyOf(m, down) // 2 cores
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyTab})
 	m, _ = keyOf(m, up) // 4G -> auto
-	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = pressButton(t, m, "Save")
 	if m.mode != modeNormal {
-		t.Fatalf("esc left mode %v", m.mode)
+		t.Fatalf("Save left mode %v", m.mode)
 	}
 	data, _ := os.ReadFile(path)
 	if got, want := string(data), "guest=\"linux\"\ncpu_cores=\"2\"\n"; got != want {
@@ -84,7 +84,7 @@ func TestQuickSettingsKeepsHandSetValuesAndLeavesUnchangedConfAlone(t *testing.T
 	if m.qs.picked(qsCPU) != "12" || m.qs.picked(qsRAM) != "6G" {
 		t.Fatalf("hand-set values not offered: cpu=%q ram=%q", m.qs.picked(qsCPU), m.qs.picked(qsRAM))
 	}
-	m, _ = keyOf(m, enter)
+	m = pressButton(t, m, "Save")
 	if data, _ := os.ReadFile(path); string(data) != conf {
 		t.Errorf(".conf rewritten without changes: %q", data)
 	}
@@ -120,7 +120,7 @@ func TestQuickSettingsGLCheckbox(t *testing.T) {
 			if !strings.Contains(m.viewQuickSettings(), "OpenGL") {
 				t.Error("view lacks the gl checkbox")
 			}
-			m, _ = keyOf(m, enter)
+			m = pressButton(t, m, "Save")
 			if data, _ := os.ReadFile(path); string(data) != tc.want {
 				t.Errorf(".conf is %q, want %q", data, tc.want)
 			}
@@ -134,7 +134,7 @@ func TestQuickSettingsGLTickedTwiceIsUnchanged(t *testing.T) {
 	m = typed(m, "Q")
 	m.qs.group = qsGL
 	m = typed(m, "  ")
-	m, _ = keyOf(m, enter)
+	m = pressButton(t, m, "Save")
 	if data, _ := os.ReadFile(path); string(data) != "a=1\n" {
 		t.Errorf(".conf rewritten: %q", data)
 	}
@@ -174,7 +174,7 @@ func TestQuickSettingsDisplay(t *testing.T) {
 			if !strings.Contains(m.viewQuickSettings(), "Display") {
 				t.Error("view lacks the display group")
 			}
-			m, _ = keyOf(m, enter)
+			m = pressButton(t, m, "Save")
 			if data, _ := os.ReadFile(path); string(data) != tc.want {
 				t.Errorf(".conf is %q, want %q", data, tc.want)
 			}
@@ -205,20 +205,71 @@ func TestQuickSettingsMovesBetweenFieldsWithTabAndShiftTabNotTheSideArrows(t *te
 			t.Fatalf("tab: focus %d, want %d", m.qs.group, want)
 		}
 	}
+	// past the last field come the buttons, and only then does it wrap
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyTab})
-	if m.qs.group != qsCPU {
-		t.Errorf("tab from the last field: focus %d, want the first", m.qs.group)
+	if focused(m) != "Save" {
+		t.Errorf("tab from the last field: focused %q, want the Save button", focused(m))
+	}
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyTab})
+	if focused(m) != "Cancel" {
+		t.Errorf("tab from Save: focused %q, want Cancel", focused(m))
+	}
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyTab})
+	if focused(m) != "" || m.qs.group != qsCPU {
+		t.Errorf("tab from the last button: focused %q, field %d, want the first field", focused(m), m.qs.group)
 	}
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyShiftTab})
-	if m.qs.group != qsSpice {
-		t.Errorf("shift-tab from the first field: focus %d, want the last", m.qs.group)
+	if focused(m) != "Cancel" {
+		t.Errorf("shift-tab from the first field: focused %q, want the last button", focused(m))
+	}
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if focused(m) != "" || m.qs.group != qsSpice {
+		t.Errorf("shift-tab back from Save: focused %q, field %d, want the last field", focused(m), m.qs.group)
 	}
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyLeft})
 	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyRight})
 	if m.qs.group != qsSpice {
 		t.Errorf("left/right moved the focus to %d", m.qs.group)
 	}
-	if v := ansi.Strip(m.viewQuickSettings()); !strings.Contains(v, "tab/shift-tab switch") {
+	if v := ansi.Strip(m.viewQuickSettings()); !strings.Contains(v, "tab/shift-tab move") {
 		t.Errorf("the dialog doesn't say how to switch:\n%s", v)
+	}
+}
+
+func TestQuickSettingsEnterDoesNotSaveAndEscDiscards(t *testing.T) {
+	for name, key := range map[string]tea.KeyMsg{"esc": {Type: tea.KeyEsc}, "q": {Type: tea.KeyRunes, Runes: []rune("q")}} {
+		m, path := newQuickSettingsModel(t, "guest=\"linux\"\n")
+		m.openMenu()
+		m = typed(m, "Q")
+		m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyDown}) // 1 core
+		m, _ = keyOf(m, enter)
+		if m.mode != modeQuickSettings {
+			t.Fatalf("%s: enter closed the dialog (mode %v)", name, m.mode)
+		}
+		if data, _ := os.ReadFile(path); string(data) != "guest=\"linux\"\n" {
+			t.Fatalf("%s: enter wrote the .conf: %q", name, data)
+		}
+		m, _ = keyOf(m, key)
+		if m.mode != modeNormal {
+			t.Fatalf("%s left mode %v", name, m.mode)
+		}
+		if data, _ := os.ReadFile(path); string(data) != "guest=\"linux\"\n" {
+			t.Fatalf("%s saved what was changed: %q", name, data)
+		}
+	}
+}
+
+func TestQuickSettingsCancelButtonDiscards(t *testing.T) {
+	m, path := newQuickSettingsModel(t, "guest=\"linux\"\n")
+	m.openMenu()
+	m = typed(m, "Q")
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = pressButton(t, m, "Cancel")
+	if m.mode != modeNormal {
+		t.Fatalf("mode %v", m.mode)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "guest=\"linux\"\n" {
+		t.Fatalf("Cancel saved: %q", data)
 	}
 }

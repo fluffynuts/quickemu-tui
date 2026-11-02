@@ -16,7 +16,7 @@ import (
 // VM, or right-clicking any, opens its actions menu, where clicking an item
 // runs it and clicking outside closes it. In quick settings a click picks a
 // choice or ticks the checkbox, and clicking outside saves and closes, like
-// esc. The wheel moves through whatever list is under it, and elsewhere stands
+// esc (discarding). The wheel moves through whatever list is under it, and elsewhere stands
 // in for ↑/↓. Every dialog has a close button ([x] in its top border) that
 // does what esc does there, and those that ask something have buttons
 // ([ Save ], [ Yes ] [ No ] etc.) that press the key they stand for. In the
@@ -64,11 +64,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.instStep == stepCustomOptions {
 			// ↑↓ would change what a row says, which a stray wheel mustn't
-			key := tea.KeyMsg{Type: tea.KeyTab}
-			if wheel < 0 {
-				key = tea.KeyMsg{Type: tea.KeyShiftTab}
-			}
-			return m.Update(key)
+			m.custom.row = clamp(m.custom.row+wheel, 0, customRows-1)
+			return m, nil
 		}
 	}
 	if wheel != 0 {
@@ -198,7 +195,7 @@ func (m Model) mouseQuickSettings(msg tea.MouseMsg, wheel int) (tea.Model, tea.C
 	box := modalStyle.Render(m.viewQuickSettings())
 	bx, by := m.modalAt(box)
 	if wheel == 0 && !inBox(box, bx, by, msg.X, msg.Y) {
-		return m.saveQuickSettings()
+		return m.cancelQuickSettings()
 	}
 	qs := &m.qs
 	l := m.qsLayout()

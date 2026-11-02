@@ -351,6 +351,13 @@ func (m Model) handleInstallPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// installBack steps back one step, whatever has been typed into the filter.
+func (m Model) installBack() (tea.Model, tea.Cmd) {
+	m.instStep = m.stepBack()
+	m.instFilter, m.instCursor = "", 0
+	return m, nil
+}
+
 // stepBack is the step before the current one, skipping steps that had
 // nothing to choose.
 func (m Model) stepBack() installStep {
@@ -524,8 +531,8 @@ func (m Model) handleInstallProgressKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+c":
 		return m.interruptQuit()
-	case "esc", "enter", "b":
-		m.mode = modeNormal // keeps running; n brings this back
+	case "esc", "b":
+		return m.installToBackground()
 	case "c":
 		if m.install != nil {
 			m.askConfirm("Cancel the install of "+m.install.title+"?\nPartly downloaded files are kept so it can resume.", defaultNo, func(m *Model) tea.Cmd {
@@ -536,6 +543,13 @@ func (m Model) handleInstallProgressKey(key string) (tea.Model, tea.Cmd) {
 			})
 		}
 	}
+	return m, nil
+}
+
+// installToBackground closes the progress dialog; the install keeps running,
+// and n brings it back.
+func (m Model) installToBackground() (tea.Model, tea.Cmd) {
+	m.mode = modeNormal
 	return m, nil
 }
 
@@ -665,7 +679,7 @@ func (m Model) viewInstallPick() string {
 	}
 	lines := []string{titleStyle.Render(title), ""}
 	if len(m.catalog) == 0 {
-		return strings.Join(append(lines, dimStyle.Render("asking quickget what it can install (this can take a while)…")), "\n")
+		return strings.Join(append(lines, dimStyle.Render("asking quickget what it can install (this can take a while)…"), "", m.buttonRow()), "\n")
 	}
 	sizing := m.isSizingStep()
 	if sizing {
@@ -702,7 +716,7 @@ func (m Model) viewInstallPick() string {
 		help = "↑↓ select • enter next • esc back"
 	}
 	lines = append(lines, windowAround(rows, cursor, listRows)...)
-	lines = append(lines, "", dimStyle.Render(help))
+	lines = append(lines, "", m.buttonRow(), "", dimStyle.Render(help))
 	return strings.Join(lines, "\n")
 }
 
@@ -760,7 +774,7 @@ func (m Model) viewInstallProgress() string {
 		elapsed += "   " + speed
 	}
 	lines = append(lines, "", dimStyle.Render(trunc(line, progressBarWidth+8)), dimStyle.Render(elapsed),
-		"", button(progressBackground)+"  "+button(progressCancel),
+		"", m.buttonRow(),
 		"", dimStyle.Render("esc/b keep running in background • c cancel • n reopens this"))
 	return strings.Join(lines, "\n")
 }

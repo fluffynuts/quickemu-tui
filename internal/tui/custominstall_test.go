@@ -119,7 +119,8 @@ func TestCustomISOFromAFileIsCopiedWithTheChosenSettings(t *testing.T) {
 		}
 	}
 	m = press(m, tea.KeyTab, tea.KeyDown) // the boot row, then its next choice: legacy
-	m = press(m, tea.KeyEnter, tea.KeyEnter, tea.KeyEnter)
+	m = pressButton(t, m, "Next")
+	m = press(m, tea.KeyEnter, tea.KeyEnter)
 	if m.mode != modeConfirm || !strings.Contains(m.confirmText, "Copy:") || !strings.Contains(m.confirmText, "legacy boot") {
 		t.Fatalf("mode %v, confirm %q", m.mode, m.confirmText)
 	}
@@ -175,7 +176,8 @@ func TestCustomISOFromAURLIsDownloadedAndItsChecksumChecked(t *testing.T) {
 	sum := sha256.Sum256(image)
 
 	m = customAtSettings(t, m, srv.URL+"/pub/newdistro.iso", "SHA256: "+hex.EncodeToString(sum[:]))
-	m = press(m, tea.KeyEnter, tea.KeyEnter, tea.KeyEnter)
+	m = pressButton(t, m, "Next")
+	m = press(m, tea.KeyEnter, tea.KeyEnter)
 	if !strings.Contains(m.confirmText, "Download:") || !strings.Contains(m.confirmText, "will be checked") {
 		t.Fatalf("confirm %q", m.confirmText)
 	}
@@ -253,7 +255,7 @@ func TestCustomISOCPUStepEscGoesBackToTheSettings(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "d.iso")
 	writeISO(t, src)
 	m = customAtSettings(t, m, src, "")
-	m = press(m, tea.KeyEnter)
+	m = pressButton(t, m, "Next")
 	if m.instStep != stepCPU || !strings.Contains(ansi.Strip(m.viewInstallPick()), "New VM: d – choose number of CPUs") {
 		t.Fatalf("step %v:\n%s", m.instStep, ansi.Strip(m.viewInstallPick()))
 	}
@@ -343,7 +345,8 @@ func TestCustomISOBehindRedirectsWithAChecksumFileIsNamedAndVerified(t *testing.
 	})
 
 	m = customAtSettings(t, m, srv.URL+"/files/1.2/distro-1.2.iso/download", srv.URL+"/files/1.2/distro-1.2.iso.sha256/download")
-	m = press(m, tea.KeyEnter, tea.KeyEnter, tea.KeyEnter)
+	m = pressButton(t, m, "Next")
+	m = press(m, tea.KeyEnter, tea.KeyEnter)
 	if !strings.Contains(m.confirmText, "fetched from") || !strings.Contains(m.confirmText, "Download:") {
 		t.Fatalf("confirm:\n%s", m.confirmText)
 	}
@@ -430,13 +433,26 @@ func TestCustomISOSettingsFlowWithTabAndTheUpDownArrows(t *testing.T) {
 	if m.custom.row != customRowBoot {
 		t.Fatalf("tab: row %d, want the boot row", m.custom.row)
 	}
-	m = press(m, tea.KeyTab, tea.KeyTab)
-	if m.custom.row != customRowOS {
-		t.Errorf("tab past the last row: row %d, want it back at the first", m.custom.row)
-	}
-	m = press(m, tea.KeyShiftTab)
+	m = press(m, tea.KeyTab)
 	if m.custom.row != customRowDisk {
-		t.Errorf("shift-tab from the first row: row %d, want the last", m.custom.row)
+		t.Fatalf("tab: row %d, want the disk row", m.custom.row)
+	}
+	// after the last row come the buttons, then it wraps to the first row
+	m = press(m, tea.KeyTab)
+	if focused(m) != "Next" {
+		t.Errorf("tab past the last row: focused %q, want the Next button", focused(m))
+	}
+	m = press(m, tea.KeyTab)
+	if focused(m) != "Back" {
+		t.Errorf("tab from Next: focused %q, want Back", focused(m))
+	}
+	m = press(m, tea.KeyTab)
+	if focused(m) != "" || m.custom.row != customRowOS {
+		t.Errorf("tab from the last button: focused %q, row %d, want the first row", focused(m), m.custom.row)
+	}
+	m = press(m, tea.KeyShiftTab, tea.KeyShiftTab, tea.KeyShiftTab)
+	if focused(m) != "" || m.custom.row != customRowDisk {
+		t.Errorf("shift-tab back through the buttons: focused %q, row %d, want the last row", focused(m), m.custom.row)
 	}
 
 	m = press(m, tea.KeyDown) // the disk size: after 32G
@@ -470,7 +486,8 @@ func TestAnExistingDiskForTheNameIsWarnedAboutAndEnterSaysNo(t *testing.T) {
 			must(t, os.WriteFile(disk, []byte("an earlier install"), 0o644))
 		}
 		m = customAtSettings(t, m, src, "")
-		m = press(m, tea.KeyEnter, tea.KeyEnter, tea.KeyEnter)
+		m = pressButton(t, m, "Next")
+		m = press(m, tea.KeyEnter, tea.KeyEnter)
 		if m.mode != modeConfirm {
 			t.Fatalf("mode %v, want the confirmation", m.mode)
 		}

@@ -330,3 +330,17 @@ func TestClosingADialogForgetsItsFocus(t *testing.T) {
 		t.Fatalf("mode=%v btnFocused=%v, want closed with no focus left behind", m.mode, m.btnFocused)
 	}
 }
+
+// pressButton tabs to the button with that label and presses it with enter.
+func pressButton(t *testing.T, m Model, label string) Model {
+	t.Helper()
+	for range 20 {
+		if focused(m) == label {
+			m, _ = send(m, enter)
+			return m
+		}
+		m, _ = send(m, tabKey)
+	}
+	t.Fatalf("no %q button reachable by tab in mode %v", label, m.mode)
+	return m
+}

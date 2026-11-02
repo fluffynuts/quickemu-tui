@@ -26,8 +26,13 @@ type dialogButton struct {
 
 // keyPress is a button that does what a key does in the dialog's handler.
 func keyPress(key tea.KeyMsg) func(Model) (tea.Model, tea.Cmd) {
-	return func(m Model) (tea.Model, tea.Cmd) { return m.update(key) }
+	return func(m Model) (tea.Model, tea.Cmd) {
+		m.btnFocused = false // or the key would press this button again
+		return m.update(key)
+	}
 }
+
+var keyEnter = tea.KeyMsg{Type: tea.KeyEnter}
 
 func runeKey(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
 
@@ -91,7 +96,6 @@ func (m Model) buttonRow() string {
 
 // dialogButtons are the buttons the open dialog draws, default first, or none.
 func (m Model) dialogButtons() []dialogButton {
-	enter := tea.KeyMsg{Type: tea.KeyEnter}
 	switch m.mode {
 	case modePrompt:
 		return []dialogButton{
@@ -99,7 +103,10 @@ func (m Model) dialogButtons() []dialogButton {
 			{label: "Cancel", press: func(m Model) (tea.Model, tea.Cmd) { return m.cancelPrompt() }},
 		}
 	case modeQuickSettings:
-		return []dialogButton{{label: qsButton, press: keyPress(enter)}}
+		return []dialogButton{
+			{label: qsButton, press: func(m Model) (tea.Model, tea.Cmd) { return m.saveQuickSettings() }},
+			{label: "Cancel", press: func(m Model) (tea.Model, tea.Cmd) { return m.cancelQuickSettings() }},
+		}
 	case modeConfirm:
 		yes := dialogButton{label: confirmYes, hotkey: 'y', press: func(m Model) (tea.Model, tea.Cmd) { return m.acceptConfirm() }}
 		no := dialogButton{label: confirmNo, hotkey: 'n', press: func(m Model) (tea.Model, tea.Cmd) { return m.declineConfirm(true) }}
@@ -109,13 +116,24 @@ func (m Model) dialogButtons() []dialogButton {
 		return []dialogButton{no, yes}
 	case modeInstallProgress:
 		return []dialogButton{
-			{label: progressBackground, press: keyPress(tea.KeyMsg{Type: tea.KeyEsc})},
+			{label: progressBackground, press: func(m Model) (tea.Model, tea.Cmd) { return m.installToBackground() }},
 			{label: progressCancel, hotkey: 'c', press: keyPress(runeKey('c'))},
 		}
 	case modeInstallPick:
 		if m.instStep == stepCustomOptions {
-			return []dialogButton{{label: customNextButton, press: keyPress(enter)}}
+			return []dialogButton{
+				{label: customNextButton, press: func(m Model) (tea.Model, tea.Cmd) { return m.customNext() }},
+				{label: "Back", press: func(m Model) (tea.Model, tea.Cmd) { return m.customBack() }},
+			}
 		}
+		buttons := []dialogButton{{label: "Select", press: keyPress(keyEnter)}}
+		if m.instStep != stepOS {
+			buttons = append(buttons, dialogButton{label: "Back", press: func(m Model) (tea.Model, tea.Cmd) { return m.installBack() }})
+		}
+		return append(buttons, dialogButton{label: "Cancel", press: func(m Model) (tea.Model, tea.Cmd) {
+			m.mode = modeNormal
+			return m, nil
+		}})
 	}
 	return nil
 }
@@ -123,7 +141,7 @@ func (m Model) dialogButtons() []dialogButton {
 // usesButtonFocus is whether the dialog's buttons are in its tab order.
 func (m Model) usesButtonFocus() bool {
 	switch m.mode {
-	case modeConfirm, modePrompt:
+	case modeConfirm, modePrompt, modeQuickSettings, modeInstallProgress, modeInstallPick:
 		return true
 	}
 	return false
@@ -136,14 +154,40 @@ func (m Model) bodyStops() int {
 	switch m.mode {
 	case modePrompt:
 		return 1
+	case modeQuickSettings:
+		return qsFocuses
+	case modeInstallPick:
+		if m.instStep == stepCustomOptions {
+			return customRows
+		}
+		return 1
 	}
 	return 0
 }
 
 // bodyStop is the tab stop the dialog's own focus is on.
-func (m Model) bodyStop() int { return 0 }
+func (m Model) bodyStop() int {
+	switch m.mode {
+	case modeQuickSettings:
+		return m.qs.group
+	case modeInstallPick:
+		if m.instStep == stepCustomOptions {
+			return m.custom.row
+		}
+	}
+	return 0
+}
 
-func (m *Model) setBodyStop(int) {}
+func (m *Model) setBodyStop(stop int) {
+	switch m.mode {
+	case modeQuickSettings:
+		m.qs.group = stop
+	case modeInstallPick:
+		if m.instStep == stepCustomOptions {
+			m.custom.row = stop
+		}
+	}
+}
 
 // dialogKey identifies the dialog on screen, so that a new one starts with no
 // button focused. A step of the install wizard is a different dialog; so is a

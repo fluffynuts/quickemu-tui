@@ -41,7 +41,8 @@ func TestCustomISOGetsASpiceDisplayWhenSpicyIsInstalled(t *testing.T) {
 		src := filepath.Join(t.TempDir(), "d.iso")
 		writeISO(t, src)
 		m = customAtSettings(t, m, src, "")
-		m = press(m, tea.KeyEnter, tea.KeyEnter, tea.KeyEnter)
+		m = pressButton(t, m, "Next")
+		m = press(m, tea.KeyEnter, tea.KeyEnter)
 		if got := strings.Contains(m.confirmText, "SPICE display"); got != spicy {
 			t.Errorf("spicy=%v: the confirmation mentions SPICE: %v\n%s", spicy, got, m.confirmText)
 		}

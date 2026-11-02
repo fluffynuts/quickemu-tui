@@ -156,12 +156,8 @@ func (m Model) handleQuickSettingsKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+c":
 		return m.interruptQuit()
-	case "esc", "enter", "q":
-		return m.saveQuickSettings()
-	case "tab":
-		qs.group = (g + 1) % qsFocuses
-	case "shift+tab":
-		qs.group = (g + qsFocuses - 1) % qsFocuses
+	case "esc", "q":
+		return m.cancelQuickSettings()
 	case " ", "x":
 		switch g {
 		case qsGL:
@@ -189,6 +185,12 @@ func (m Model) handleQuickSettingsKey(key string) (tea.Model, tea.Cmd) {
 // picked is the value chosen in group g ("" for auto).
 func (qs quickSettings) picked(g int) string {
 	return qs.items[g][qs.cursor[g]].value
+}
+
+// cancelQuickSettings closes the dialog, leaving the .conf as it was.
+func (m Model) cancelQuickSettings() (tea.Model, tea.Cmd) {
+	m.mode = modeNormal
+	return m, nil
 }
 
 // saveQuickSettings closes the dialog, writing whatever changed to the .conf:
@@ -231,7 +233,7 @@ func (m Model) saveQuickSettings() (tea.Model, tea.Cmd) {
 	return m, m.pollNow()
 }
 
-// qsButton is the label of the button that does what enter does.
+// qsButton is the label of the button that saves.
 const qsButton = "Save"
 
 // qsHeadLines is how many lines of the dialog come before the groups.
@@ -286,7 +288,7 @@ func (m Model) viewQuickSettings() string {
 	copy(canvas, []string{
 		titleStyle.Render("Quick settings: " + qs.vm.Name()),
 		"",
-		dimStyle.Render("Saved to the .conf when you close this; applies on next start."),
+		dimStyle.Render("Saved to the .conf when you press Save; applies on next start."),
 	})
 	for g := range qsGroups {
 		for i, line := range l.cols[g] {
@@ -296,8 +298,8 @@ func (m Model) viewQuickSettings() string {
 	}
 	canvas[l.glY] = qs.viewGL()
 	canvas[l.glY+1] = qs.viewSpice()
-	canvas[l.glY+3] = button(qsButton)
-	canvas[l.glY+5] = dimStyle.Render("↑↓ choose • space tick • tab/shift-tab switch • enter/esc save and close")
+	canvas[l.glY+3] = m.buttonRow()
+	canvas[l.glY+5] = dimStyle.Render("↑↓ choose • space tick • tab/shift-tab move • esc cancel")
 	return strings.Join(canvas, "\n")
 }
 

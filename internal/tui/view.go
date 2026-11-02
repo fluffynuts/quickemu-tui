@@ -169,14 +169,14 @@ func (m Model) viewKeys() string {
 	case modeDefaults:
 		keys = "ctrl+s save • esc discard"
 	case modeQuickSettings:
-		keys = "↑↓ choose • space tick • tab/shift-tab switch • enter/esc save and close"
+		keys = "↑↓ choose • space tick • tab/shift-tab move • esc cancel"
 	case modeInstallPick:
-		keys = "type to filter • ↑↓ pgup pgdn • enter select • esc back"
+		keys = "type to filter • ↑↓ pgup pgdn • enter select • tab buttons • esc back"
 		if m.instStep == stepCustomOptions {
-			keys = "tab/shift-tab setting • ↑↓ change • enter next • esc back"
+			keys = "tab/shift-tab setting • ↑↓ change • esc back"
 		}
 	case modeInstallProgress:
-		keys = "esc keep running in background • c cancel"
+		keys = "esc keep running in background • c cancel • tab buttons"
 	case modeError:
 		keys = "↑↓ pgup pgdn home end scroll • esc/enter close"
 	case modeSnapDelete:

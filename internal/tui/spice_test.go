@@ -106,7 +106,7 @@ func TestQuickSettingsSpiceCheckboxWritesAndRemovesDisplay(t *testing.T) {
 			}
 			m.qs.group = qsSpice
 			m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeySpace})
-			m, _ = keyOf(m, enter)
+			m = pressButton(t, m, "Save")
 			if data, _ := os.ReadFile(path); string(data) != tc.want {
 				t.Errorf(".conf is %q, want %q", data, tc.want)
 			}
