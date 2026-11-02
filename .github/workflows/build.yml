@@ -165,11 +165,13 @@ jobs:
         with:
           pattern: quickemu-tui-seed.tar.gz
           merge-multiple: true
-          path: seed
+          # Outside the checkout: an untracked folder in it would make the
+          # build stamp itself "-dirty" (see GIT_DIRTY in the Makefile).
+          path: ${{ runner.temp }}/seed
           skip-decompress: true
       - name: Put the seed in place
         if: needs.seed.outputs.packed == 'true'
-        run: tar -xzf "$(find seed -type f -name quickemu-tui-seed.tar.gz | head -n 1)" -C internal/seed/data
+        run: tar -xzf "$(find "$RUNNER_TEMP/seed" -type f -name quickemu-tui-seed.tar.gz | head -n 1)" -C internal/seed/data
       - name: Package
         id: dist
         env:
