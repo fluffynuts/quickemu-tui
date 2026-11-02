@@ -49,7 +49,9 @@ func TestSnapshotLifecycleWithRealQemuImg(t *testing.T) {
 			t.Fatalf("create %s: %v", tag, err)
 		}
 	}
-	if got, want := refs(), []string{"alpha", "beta", "gamma"}; !reflect.DeepEqual(got, want) {
+	// Newest first. All three are made within the same second, so this also
+	// pins the tie-break: equal dates keep the later-listed snapshot on top.
+	if got, want := refs(), []string{"gamma", "beta", "alpha"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("after create: %v, want %v", got, want)
 	}
 
