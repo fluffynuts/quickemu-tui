@@ -109,6 +109,20 @@ jobs:
           archive: false
           if-no-files-found: error
 
+  # staticcheck: unused code, ineffectual assignments and the like that go vet
+  # doesn't find. Its version is pinned in the Makefile.
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: make lint-install
+      - run: echo "$(go env GOPATH)/bin" >>"$GITHUB_PATH"
+      - run: make lint
+
   test:
     name: test (${{ matrix.os }})
     strategy:
@@ -142,7 +156,7 @@ jobs:
 
   package:
     name: package (${{ matrix.goos }}/${{ matrix.goarch }})
-    needs: [test, seed]
+    needs: [test, seed, lint]
     # a weekly run that found nothing new has nothing to build
     if: github.event_name != 'schedule' || needs.seed.outputs.changed == 'true'
     strategy:

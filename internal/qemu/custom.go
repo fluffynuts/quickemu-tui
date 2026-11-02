@@ -356,6 +356,7 @@ func FetchISO(ctx context.Context, source, dir string, progress func(InstallProg
 	res.Path = filepath.Join(dir, res.File)
 	if problem := ISOProblemFor(part); problem != "" && !isRawImage(res.File) {
 		_ = os.Remove(part) // kept, a retry would resume from a web page
+		//lint:ignore ST1005 shown to the user as sentences in a dialog, not wrapped by a caller
 		return res, fmt.Errorf("%s: what it served %s\n\nIf that is a download page, use the address of its download button or link.", source, problem)
 	}
 	if err := os.Rename(part, res.Path); err != nil {

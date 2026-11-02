@@ -33,7 +33,7 @@ DIST_NAME   := $(BINARY)-$(FULL_VERSION)-$(PLATFORM)-$(GOARCH)
 SOURCES := $(shell find . -name '*.go' -not -path './vendor/*') go.mod \
 	$(shell find internal/seed/data 2>/dev/null)
 
-.PHONY: all build test vet fmt fmtcheck tidy run install uninstall clean dist seed
+.PHONY: all build test vet fmt fmtcheck lint lint-install tidy run install uninstall clean dist seed
 
 all: build
 
@@ -60,6 +60,17 @@ fmtcheck:
 	if [ -n "$$unformatted" ]; then \
 		echo "not gofmt-formatted (run make fmt):"; echo "$$unformatted"; exit 1; \
 	fi
+
+# staticcheck finds unused code, ineffectual assignments and the like that vet
+# doesn't; CI runs this, with the version pinned here.
+STATICCHECK_VERSION ?= 2026.2.2
+
+lint:
+	@command -v staticcheck >/dev/null 2>&1 || { echo "staticcheck not found on PATH: run make lint-install, and put $$($(GO) env GOPATH)/bin on PATH"; exit 1; }
+	staticcheck ./...
+
+lint-install:
+	$(GO) install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
 
 tidy:
 	$(GO) mod tidy

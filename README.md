@@ -22,6 +22,7 @@ New Guest
 ```bash
 go mod tidy          # resolves go.sum (and toolchain, if a dep needs newer Go)
 go test ./...        # core logic: conf parsing, monitor protocol, parsers
+make lint            # staticcheck: unused code and the like (make lint-install first)
 go build -o quickemu-tui .
 ```
 

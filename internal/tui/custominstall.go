@@ -347,6 +347,7 @@ func runCustomInstall(ctx context.Context, root string, c qemu.CustomISO, choice
 			if ctx.Err() == nil {
 				// kept, a bad image would be used as it is by the next attempt
 				_ = os.Remove(res.Path)
+				//lint:ignore ST1005 shown to the user as sentences in a dialog, not wrapped by a caller
 				err = fmt.Errorf("%v\n\n%s was removed. Check the checksum, and the address, and try again.", err, res.File)
 			}
 			return installDoneMsg{err: err}
