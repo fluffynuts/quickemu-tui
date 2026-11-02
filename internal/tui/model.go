@@ -286,10 +286,9 @@ func (m Model) checkUpdateCmd() tea.Cmd {
 	}
 	ctx := m.bg
 	return func() tea.Msg {
-		latest, err := check(ctx)
-		if err != nil {
-			return updateMsg{}
-		}
+		// Check returns "" when it couldn't ask, and a release it found even if
+		// it then couldn't save it to its cache, so the error adds nothing here.
+		latest, _ := check(ctx)
 		return updateMsg{latest: latest}
 	}
 }

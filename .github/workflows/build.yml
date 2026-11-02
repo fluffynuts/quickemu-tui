@@ -172,6 +172,16 @@ jobs:
       - name: Put the seed in place
         if: needs.seed.outputs.packed == 'true'
         run: tar -xzf "$(find "$RUNNER_TEMP/seed" -type f -name quickemu-tui-seed.tar.gz | head -n 1)" -C internal/seed/data
+      # make stamps the build "-dirty" when anything in the checkout is
+      # untracked or modified, and a release must never say that.
+      - name: Check the tree is clean
+        run: |
+          status=$(git status --porcelain)
+          if [ -n "$status" ]; then
+            echo "the build would be stamped -dirty:"
+            echo "$status"
+            exit 1
+          fi
       - name: Package
         id: dist
         env:

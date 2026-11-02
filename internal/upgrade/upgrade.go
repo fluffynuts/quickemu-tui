@@ -97,6 +97,13 @@ func Compare(a, b string) (cmp int, ok bool) {
 	return 0, true
 }
 
+// isReleaseVersion is whether v is a version that can be compared with a
+// release's, as opposed to "dev" or nothing.
+func isReleaseVersion(v string) bool {
+	_, ok := parseVersion(v)
+	return ok
+}
+
 func parseVersion(v string) ([]int, bool) {
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
 	if v == "" {

@@ -31,7 +31,7 @@ type checkCache struct {
 // A failure to ask GitHub returns "" and the error. A failure only to write
 // the cache returns the answer together with the error.
 func Check(ctx context.Context, opts Options, cachePath string, now time.Time) (string, error) {
-	if _, ok := Compare(opts.Current, opts.Current); !ok {
+	if !isReleaseVersion(opts.Current) {
 		return "", nil
 	}
 	latest, ok := readFreshCache(cachePath, now)

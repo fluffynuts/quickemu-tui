@@ -103,6 +103,15 @@ func runUpgrade() int {
 	return 0
 }
 
+// updateChecker is what the TUI runs in the background to look for a newer
+// release than current. apiBase redirects the GitHub API (empty for the real
+// one); cachePath may be empty to go without a cache.
+func updateChecker(current, apiBase, cachePath string) func(context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		return upgrade.Check(ctx, upgrade.Options{Current: current, APIBase: apiBase}, cachePath, time.Now())
+	}
+}
+
 // ensureVMDir creates the VM directory if it's missing (first run, or removed
 // since): quickget runs inside it, and fails with a misleading
 // "fork/exec .../quickget: no such file or directory" when it doesn't exist.
@@ -151,7 +160,7 @@ func main() {
 	quickemu := flag.String("quickemu", "", "path to quickemu (default: found on PATH)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	doUpgrade := flag.Bool("upgrade", false, "download the latest release for this machine from GitHub and replace this binary")
-	noUpdateCheck := flag.Bool("no-update-check", false, "don't look for a newer release in the background (done at most once a day)")
+	noUpdateCheck := flag.Bool("no-update-check", false, "don't look for a newer release in the background (otherwise done at most once a day, when GitHub answers)")
 	noMouse := flag.Bool("no-mouse", false, "don't use the mouse, leaving it to the terminal (e.g. for selecting text without holding shift)")
 	flag.Parse()
 	if *showVersion {
@@ -212,12 +221,7 @@ func main() {
 	}
 
 	if !*noUpdateCheck {
-		opts.CheckUpdate = func(ctx context.Context) (string, error) {
-			return upgrade.Check(ctx, upgrade.Options{
-				Current: version,
-				APIBase: os.Getenv("QUICKEMU_TUI_API_BASE"),
-			}, updateCachePath, time.Now())
-		}
+		opts.CheckUpdate = updateChecker(version, os.Getenv("QUICKEMU_TUI_API_BASE"), updateCachePath)
 	}
 
 	programOpts := []tea.ProgramOption{tea.WithAltScreen()}

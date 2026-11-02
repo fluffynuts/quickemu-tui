@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,5 +40,19 @@ func TestEnsureVMDirReportsAFileInTheWay(t *testing.T) {
 	}
 	if err := ensureVMDir(file); err == nil {
 		t.Errorf("ensureVMDir(%q) succeeded on a plain file", file)
+	}
+}
+
+func TestUpdateCheckerIsWiredToTheRunningVersion(t *testing.T) {
+	// a dev build has nothing to compare, so it answers without asking GitHub
+	// (the unreachable API base would make any attempt fail)
+	check := updateChecker("dev", "http://127.0.0.1:1", "")
+	if latest, err := check(context.Background()); latest != "" || err != nil {
+		t.Fatalf("a dev build checked anyway: %q, %v", latest, err)
+	}
+	// a release build does ask, and an unreachable API is reported
+	check = updateChecker("0.1.29", "http://127.0.0.1:1", "")
+	if _, err := check(context.Background()); err == nil {
+		t.Fatal("a release build never asked")
 	}
 }
