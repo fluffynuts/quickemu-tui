@@ -620,7 +620,7 @@ func TestQuitCanWaitForTheBackgroundRefresh(t *testing.T) {
 	if m.mode != modeConfirm || m.confirmText != waitPrompt || cmd != nil {
 		t.Fatalf("mode=%v text=%q", m.mode, m.confirmText)
 	}
-	if v := m.View(); strings.Index(v, "[ No ]") < 0 || strings.Index(v, "[ No ]") > strings.Index(v, "[ Yes ]") {
+	if v := m.View(); !strings.Contains(v, "[ No ]") || strings.Index(v, "[ No ]") > strings.Index(v, "[ Yes ]") {
 		t.Errorf("no should be the default, so first:\n%s", v)
 	}
 	m, _ = keyOf(m, enter)

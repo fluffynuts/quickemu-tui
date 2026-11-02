@@ -112,6 +112,20 @@ func updateChecker(current, apiBase, cachePath string) func(context.Context) (st
 	}
 }
 
+// programOptions are the terminal options of a program: the alternate screen
+// if altScreen, and the mouse (clicks and the wheel) if mouse. Both the first-run
+// dialog and the main screen get them from here, so -no-mouse covers both.
+func programOptions(altScreen, mouse bool) []tea.ProgramOption {
+	var opts []tea.ProgramOption
+	if altScreen {
+		opts = append(opts, tea.WithAltScreen())
+	}
+	if mouse {
+		opts = append(opts, tea.WithMouseCellMotion())
+	}
+	return opts
+}
+
 // ensureVMDir creates the VM directory if it's missing (first run, or removed
 // since): quickget runs inside it, and fails with a misleading
 // "fork/exec .../quickget: no such file or directory" when it doesn't exist.
@@ -136,11 +150,7 @@ func resolveDir(def string, mouse bool) (string, error) {
 	if cfg != nil && cfg.VMDir != "" {
 		return cfg.VMDir, nil
 	}
-	var programOpts []tea.ProgramOption
-	if mouse {
-		programOpts = append(programOpts, tea.WithMouseCellMotion())
-	}
-	final, err := tea.NewProgram(tui.NewSetup(def), programOpts...).Run()
+	final, err := tea.NewProgram(tui.NewSetup(def), programOptions(false, mouse)...).Run()
 	if err != nil {
 		return "", err
 	}
@@ -228,11 +238,7 @@ func main() {
 		opts.CheckUpdate = updateChecker(version, os.Getenv("QUICKEMU_TUI_API_BASE"), updateCachePath)
 	}
 
-	programOpts := []tea.ProgramOption{tea.WithAltScreen()}
-	if !*noMouse {
-		programOpts = append(programOpts, tea.WithMouseCellMotion())
-	}
-	program := tea.NewProgram(tui.New(opts), programOpts...)
+	program := tea.NewProgram(tui.New(opts), programOptions(true, !*noMouse)...)
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "quickemu-tui:", err)
 		os.Exit(1)

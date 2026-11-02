@@ -311,3 +311,23 @@ func TestMediaButtonsReloadAndStayOpen(t *testing.T) {
 		t.Fatalf("mode %v loading %v, want it open and asking the monitor again", m.mode, m.mediaLoading)
 	}
 }
+
+func TestTheDefaultsTextBoxHasTheCursorOnlyWhileItHasTheFocus(t *testing.T) {
+	m := dialogModel(t)
+	m.openDefaults()
+	if !m.defInput.Focused() {
+		t.Fatal("the text box should start focused")
+	}
+	m, _ = send(m, tabKey) // Save
+	if m.defInput.Focused() {
+		t.Error("the text box still has the cursor while Save is focused")
+	}
+	m, _ = send(m, tabKey, tabKey) // Cancel, then back to the text box
+	if !m.defInput.Focused() {
+		t.Error("the text box lost the cursor when the focus came back to it")
+	}
+	m, _ = send(m, shiftTabKey)
+	if m.defInput.Focused() {
+		t.Error("shift+tab onto a button left the cursor in the text box")
+	}
+}

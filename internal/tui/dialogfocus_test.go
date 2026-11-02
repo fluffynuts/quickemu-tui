@@ -128,12 +128,12 @@ func TestArrowsMoveBetweenButtonsOnceOneIsFocused(t *testing.T) {
 
 func TestYAndNStillAnswerAndEscStillDismisses(t *testing.T) {
 	m, p := openConfirm(t, defaultNo)
-	m, _ = send(m, runes("y"))
+	send(m, runes("y"))
 	if p.accepted != 1 {
 		t.Errorf("y: accepted=%d", p.accepted)
 	}
 	m, p = openConfirm(t, defaultYes)
-	m, _ = send(m, runes("n"))
+	send(m, runes("n"))
 	if p.declined != 1 {
 		t.Errorf("n: declined=%d", p.declined)
 	}
@@ -159,7 +159,7 @@ func TestADifferentDialogStartsUnfocused(t *testing.T) {
 func TestConfirmShowsItsButtonsDefaultFirstAndNoYNHint(t *testing.T) {
 	m, _ := openConfirm(t, defaultYes)
 	s := screen(m)
-	if strings.Index(s, "[ Yes ]") < 0 || strings.Index(s, "[ Yes ]") > strings.Index(s, "[ No ]") {
+	if !strings.Contains(s, "[ Yes ]") || strings.Index(s, "[ Yes ]") > strings.Index(s, "[ No ]") {
 		t.Errorf("default yes: want Yes before No:\n%s", s)
 	}
 	if strings.Contains(s, "Y/n") || strings.Contains(s, "y/N") {
@@ -167,7 +167,7 @@ func TestConfirmShowsItsButtonsDefaultFirstAndNoYNHint(t *testing.T) {
 	}
 	m, _ = openConfirm(t, defaultNo)
 	s = screen(m)
-	if strings.Index(s, "[ No ]") < 0 || strings.Index(s, "[ No ]") > strings.Index(s, "[ Yes ]") {
+	if !strings.Contains(s, "[ No ]") || strings.Index(s, "[ No ]") > strings.Index(s, "[ Yes ]") {
 		t.Errorf("default no: want No before Yes:\n%s", s)
 	}
 }
@@ -213,7 +213,7 @@ func TestHotkeyLetterIsPickedOutOfTheLabel(t *testing.T) {
 
 func TestClickingAConfirmButtonPressesIt(t *testing.T) {
 	m, p := openConfirm(t, defaultYes)
-	m = click(t, m, "[ No ]", anywhere, tea.MouseButtonLeft)
+	click(t, m, "[ No ]", anywhere, tea.MouseButtonLeft)
 	if p.declined != 1 {
 		t.Fatalf("clicking No: accepted=%d declined=%d", p.accepted, p.declined)
 	}
@@ -264,7 +264,7 @@ func TestPromptTabGoesFromTheTextBoxToItsButtonsThenBack(t *testing.T) {
 
 func TestPromptEnterOnTheButtonsSubmitsOrCancels(t *testing.T) {
 	m, p := openPrompt(t)
-	m, _ = send(m, tabKey, enter)
+	send(m, tabKey, enter)
 	if len(p.submitted) != 1 {
 		t.Fatalf("Save: submitted=%v", p.submitted)
 	}
@@ -281,7 +281,7 @@ func TestTypingWhileAButtonIsFocusedGoesBackToTheTextBox(t *testing.T) {
 	if focused(m) != "" {
 		t.Fatalf("%q still focused after typing", focused(m))
 	}
-	m, _ = send(m, enter)
+	send(m, enter)
 	if len(p.submitted) != 1 || p.submitted[0] != "start!" {
 		t.Fatalf("submitted=%v, want the typed character in the text", p.submitted)
 	}
@@ -343,4 +343,23 @@ func pressButton(t *testing.T, m Model, label string) Model {
 	}
 	t.Fatalf("no %q button reachable by tab in mode %v", label, m.mode)
 	return m
+}
+
+func TestThePromptsTextBoxHasTheCursorOnlyWhileItHasTheFocus(t *testing.T) {
+	m, _ := openPrompt(t)
+	if !m.input.Focused() {
+		t.Fatal("the text box should start focused")
+	}
+	m, _ = send(m, tabKey) // Save
+	if m.input.Focused() {
+		t.Error("the text box still has the cursor while Save is focused")
+	}
+	m, _ = send(m, tabKey, tabKey) // Cancel, then back to the text box
+	if !m.input.Focused() {
+		t.Error("the text box lost the cursor when the focus came back to it")
+	}
+	m, _ = send(m, shiftTabKey) // Cancel again
+	if m.input.Focused() {
+		t.Error("shift+tab onto a button left the cursor in the text box")
+	}
 }

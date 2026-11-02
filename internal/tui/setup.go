@@ -16,6 +16,7 @@ var setupButtons = []dialogButton{{label: "Save"}, {label: "Quit"}}
 type Setup struct {
 	input     textinput.Model
 	focus     int    // -1: the text box; otherwise an index into setupButtons
+	problem   string // why Save did nothing, until the next key or click
 	Dir       string // the confirmed directory; empty if cancelled
 	cancelled bool
 }
@@ -50,6 +51,7 @@ func (s Setup) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (s Setup) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	s.problem = ""
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		return s.quit()
@@ -58,13 +60,15 @@ func (s Setup) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if s.focus >= len(setupButtons) {
 			s.focus = -1
 		}
-		return s, s.syncFocus()
+		cmd := s.syncFocus() // not inline in the return: the order of evaluating s against a call that changes it isn't defined
+		return s, cmd
 	case "shift+tab":
 		s.focus = s.focus - 1
 		if s.focus < -1 {
 			s.focus = len(setupButtons) - 1
 		}
-		return s, s.syncFocus()
+		cmd := s.syncFocus()
+		return s, cmd
 	}
 	if s.focus >= 0 {
 		switch msg.String() {
@@ -100,6 +104,7 @@ func (s Setup) press(n int) (tea.Model, tea.Cmd) {
 		s.Dir = v
 		return s, tea.Quit
 	}
+	s.problem = "Enter a directory."
 	return s, nil
 }
 
@@ -124,6 +129,7 @@ func (s Setup) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress || (msg.Button != tea.MouseButtonLeft && msg.Button != tea.MouseButtonRight) {
 		return s, nil
 	}
+	s.problem = ""
 	box := s.box()
 	left := lipgloss.Width(box) - closeButtonOffset
 	if msg.Y == setupTop && msg.X >= left && msg.X < left+lipgloss.Width(closeButton) {
@@ -139,7 +145,8 @@ func (s Setup) box() string {
 	body := titleStyle.Render("Welcome to quickemu-tui") + "\n\n" +
 		"Where are your quickemu VMs kept?\n" +
 		dimStyle.Render("(the directory containing your *.conf files)") + "\n\n" +
-		s.input.View() + "\n\n" +
+		s.input.View() + "\n" +
+		errStyle.Render(s.problem) + "\n" + // a line is kept for it, so the dialog doesn't change size
 		renderButtons(setupButtons, s.focus) + "\n\n" +
 		dimStyle.Render("enter in the text box saves • tab buttons • esc quit")
 	return withClose(modalStyle.Render(body))

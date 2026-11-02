@@ -133,3 +133,67 @@ func TestSetupButtonsAndCloseButtonRespondToClicks(t *testing.T) {
 		t.Errorf("[x]: cancelled=%v quits=%v", s.Cancelled(), quits(cmd))
 	}
 }
+
+func TestSetupTextBoxHasTheCursorOnlyWhileItHasTheFocus(t *testing.T) {
+	s := NewSetup("/vms")
+	if !s.input.Focused() {
+		t.Fatal("the text box should start focused")
+	}
+	s, _ = setupSend(s, tabKey) // Save
+	if s.input.Focused() {
+		t.Error("the text box still has the cursor while Save is focused")
+	}
+	s, _ = setupSend(s, tabKey, tabKey) // Quit, then back to the text box
+	if !s.input.Focused() {
+		t.Error("the text box lost the cursor when the focus came back to it")
+	}
+	s, _ = setupSend(s, shiftTabKey) // Quit
+	if s.input.Focused() {
+		t.Error("shift+tab onto a button left the cursor in the text box")
+	}
+}
+
+func TestSavingAnEmptyDirectoryExplainsWhyNothingHappened(t *testing.T) {
+	for name, press := range map[string]func(Setup) (Setup, tea.Cmd){
+		"enter in the box":  func(s Setup) (Setup, tea.Cmd) { return setupSend(s, enter) },
+		"the Save button":   func(s Setup) (Setup, tea.Cmd) { return setupSend(s, tabKey, enter) },
+		"a click on Save":   func(s Setup) (Setup, tea.Cmd) { return clickSetup(t, s, "[ Save ]") },
+		"space on the Save": func(s Setup) (Setup, tea.Cmd) { return setupSend(s, tabKey, spaceKey) },
+	} {
+		s := NewSetup("")
+		if strings.Contains(ansi.Strip(s.View()), "Enter a directory") {
+			t.Fatalf("%s: the message is there before anything was tried", name)
+		}
+		s, cmd := press(s)
+		if s.Dir != "" || quits(cmd) {
+			t.Errorf("%s: saved an empty directory (Dir=%q)", name, s.Dir)
+		}
+		if v := ansi.Strip(s.View()); !strings.Contains(v, "Enter a directory") {
+			t.Errorf("%s: no explanation shown:\n%s", name, v)
+		}
+	}
+}
+
+func TestTheEmptyDirectoryMessageGoesAwayOnTheNextKeyAndTheDialogKeepsItsSize(t *testing.T) {
+	s := NewSetup("")
+	quiet := strings.Count(s.View(), "\n")
+	s, _ = setupSend(s, enter)
+	if got := strings.Count(s.View(), "\n"); got != quiet {
+		t.Errorf("the message changed the dialog's height from %d to %d lines, which would shift the buttons under the mouse", quiet, got)
+	}
+	s, _ = setupSend(s, runes("/"))
+	if strings.Contains(ansi.Strip(s.View()), "Enter a directory") {
+		t.Error("the message is still there after typing")
+	}
+	s, cmd := setupSend(s, enter)
+	if s.Dir != "/" || !quits(cmd) {
+		t.Errorf("Dir=%q quits=%v, want it saved now there is something", s.Dir, quits(cmd))
+	}
+}
+
+func TestABlankDirectoryOfOnlySpacesIsRefusedToo(t *testing.T) {
+	s, cmd := setupSend(NewSetup("   "), enter)
+	if s.Dir != "" || quits(cmd) || !strings.Contains(ansi.Strip(s.View()), "Enter a directory") {
+		t.Fatalf("Dir=%q quits=%v:\n%s", s.Dir, quits(cmd), ansi.Strip(s.View()))
+	}
+}

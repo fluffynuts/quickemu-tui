@@ -32,10 +32,19 @@ program, follows the same rules):
   in the dialog, and still chooses the highlighted row of a list or picker. It no longer
   takes a confirmation's default, saves quick settings, advances the custom ISO
   screen or closes the error dialog.
-- Esc cancels, meaning closes, whatever the dialog (in the install steps it
-  steps back, as before). Every dialog has a Cancel or Close button as its last
-  stop; `[x]` stays a mouse-only close button and isn't a tab stop. Quick
-  settings' Cancel, esc and a click outside discard; only Save writes.
+- Esc cancels, meaning closes, in every dialog except the install wizard,
+  where it steps back one step (and closes at the first), as before; in a
+  confirmation it dismisses without answering No, so a No that is wired to do
+  something doesn't run.
+- Every dialog has a button that leaves it without doing what it asks, named
+  for what that means there: Cancel or Close; Back on the custom ISO settings
+  and on the install steps past the first; Quit in the first-run setup; No in
+  a confirmation; Background on the install progress dialog, whose Cancel
+  cancels the install itself. It is usually the last button, but is the
+  default (so first) where leaving is the safe choice: a confirmation whose
+  default is No, and the install progress dialog. `[x]` stays a mouse-only
+  close button and isn't a tab stop. Quick settings' Cancel, esc and a click
+  outside discard; only Save writes.
 - `y` and `n` still answer a confirmation, and the hint text for them is gone.
 - Where tab used to switch something, that moves to the arrows: in the logs
   dialog ← and → switch file, and the dialog and the key hints say so.

@@ -77,9 +77,13 @@ through its buttons, wrapping round. The first button is the default, drawn
 bold green; the others are blue, and the focused one is reversed. Enter or
 space presses the focused button, and enter does nothing else, so a stray
 enter never accepts anything: it only chooses the highlighted row of a list or
-picker, or submits a text box that is the only thing in the dialog. Esc cancels
-(closes) a dialog, and a button's underlined letter, as in `[ Yes ]` and
-`[ No ]`, is a key that presses it. Where the logs dialog used tab to switch
+picker, or submits a text box that is the only thing in the dialog. Esc closes
+a dialog without doing what it asks, except in the install steps, where it
+steps back one step first. Every dialog has a button that does the same, named
+for what it means there (`[ Cancel ]`, `[ Close ]`, `[ Back ]`, `[ Quit ]` in
+the first-run setup, `[ No ]` in a confirmation, `[ Background ]` on the
+install progress dialog). A button's underlined letter,
+as in `[ Yes ]` and `[ No ]`, is a key that presses it. Where the logs dialog used tab to switch
 file it now uses ← and →, and says so.
 
 The mouse works too: click a VM to select it, and click it again (or

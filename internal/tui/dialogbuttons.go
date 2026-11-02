@@ -276,12 +276,16 @@ func (m Model) handleDialogFocusKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	switch msg.String() {
-	case "tab":
-		m.moveFocus(len(buttons), +1)
-		return m, m.syncTextFocus(), true
-	case "shift+tab":
-		m.moveFocus(len(buttons), -1)
-		return m, m.syncTextFocus(), true
+	case "tab", "shift+tab":
+		dir := +1
+		if msg.String() == "shift+tab" {
+			dir = -1
+		}
+		m.moveFocus(len(buttons), dir)
+		// not inline in the return: the order of evaluating m against a call
+		// that changes it isn't defined
+		cmd := m.syncTextFocus()
+		return m, cmd, true
 	}
 	if !m.btnFocused {
 		return m, nil, false

@@ -46,6 +46,8 @@ const (
 	modeInstallProgress
 	modeDefaults
 	modeQuickSettings
+
+	modeCount // not a mode: how many there are, for the test that every dialog follows the button rules
 )
 
 type pane int

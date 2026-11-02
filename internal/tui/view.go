@@ -382,11 +382,6 @@ func (m Model) dialogBox() string {
 	return withClose(m.viewModal())
 }
 
-// button draws a button that isn't part of a dialog's tab order (yet).
-func button(label string) string {
-	return titleStyle.Render(buttonText(label))
-}
-
 // closeButton sits in a dialog's top border, this far in from its right edge.
 const (
 	closeButton       = "[x]"
