@@ -1,6 +1,6 @@
 # 16. Mouse support maps clicks onto the same layout the views draw
 
-Status: accepted (recorded retrospectively)
+Status: accepted (recorded retrospectively); the bullet on buttons is superseded by 0018
 
 ## Context
 

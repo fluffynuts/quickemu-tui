@@ -27,3 +27,4 @@ that supersedes the old one rather than rewriting history.
 | [0015](0015-releases-versioning-and-self-upgrade.md) | Every push to master is released; `--upgrade` verifies before replacing |
 | [0016](0016-mouse-support-follows-the-drawn-layout.md) | Mouse support maps clicks onto the same layout the views draw |
 | [0017](0017-resizing-a-vms-disk.md) | Resizing a VM's disk: plan, warn, and keep `disk_size` in step |
+| [0018](0018-dialog-buttons-are-tab-stops-and-enter-never-accepts-alone.md) | Dialog buttons are tab stops, and enter never accepts on its own |

@@ -14,11 +14,11 @@ import (
 // On the main screen a click selects a VM or snapshot; clicking the selected
 // VM, or right-clicking any, opens its actions menu, where clicking an item
 // runs it and clicking outside closes it. In quick settings a click picks a
-// choice or ticks the checkbox, and clicking outside saves and closes, like
-// esc (discarding). The wheel moves through whatever list is under it, and elsewhere stands
+// choice or ticks the checkbox, and clicking outside discards and closes, like
+// esc. The wheel moves through whatever list is under it, and elsewhere stands
 // in for ↑/↓. Every dialog has a close button ([x] in its top border) that
-// does what esc does there, and those that ask something have buttons
-// ([ Save ], [ Yes ] [ No ] etc.) that press the key they stand for. In the
+// does what esc does there, and its other buttons ([ Save ], [ Yes ] [ No ]
+// etc., see dialogbuttons.go) are pressed by a click. In the
 // install picker a click on a row chooses it, and on the custom ISO settings a
 // click on a row selects it, and on its ‹ or › changes it.
 

@@ -70,21 +70,30 @@ by their respective keys.
 | n | install a new VM with `quickget` (see below) |
 | enter | open the actions menu for the selected VM (↑↓ then enter runs one; esc closes) |
 
-In a dialog with several fields (quick settings, the custom ISO's settings),
-tab and shift-tab move between the fields and ↑↓ change the choice in the one
-you're on; the side arrows aren't used.
+Every dialog works the same way. Tab and shift-tab move through the dialog's
+own fields first (the text box, or the settings of quick settings and the
+custom ISO's screen, where ↑↓ change the choice in the one you're on) and then
+through its buttons, wrapping round. The first button is the default, drawn
+bold green; the others are blue, and the focused one is reversed. Enter or
+space presses the focused button, and enter does nothing else, so a stray
+enter never accepts anything: it only chooses the highlighted row of a list or
+picker, or submits a text box that is the only thing in the dialog. Esc cancels
+(closes) a dialog, and a button's underlined letter, as in `[ Yes ]` and
+`[ No ]`, is a key that presses it. Where the logs dialog used tab to switch
+file it now uses ← and →, and says so.
 
 The mouse works too: click a VM to select it, and click it again (or
 right-click it) for its actions menu, where clicking an item runs it and
 clicking outside closes it. Clicking a snapshot selects it, quick settings
-takes clicks on its choices and checkbox (clicking outside saves and closes),
+takes clicks on its choices and checkbox (clicking outside discards and closes),
 and the wheel scrolls whatever list is under it. Every dialog has a close
 button, `[x]` at the top right, which does what esc does there (the install
-picker closes rather than stepping back). Dialogs that ask something have
-buttons that press the key they stand for: `[ Save ]` in quick settings, `[ Next ]`
-or similar in the text prompts (snapshot tag, rename, SSH user, image path, the
-custom ISO's questions), `[ Yes ]` and `[ No ]` in every confirmation, and
-`[ Background ]` and `[ Cancel ]` on the install progress dialog. In the
+picker closes rather than stepping back), and a click on any of its buttons
+presses it: `[ Save ]` and `[ Cancel ]` in quick settings and the text prompts
+(the prompt's own button is named for what it does), `[ Yes ]` and `[ No ]` in
+every confirmation, `[ Background ]` and `[ Cancel ]` on the install progress
+dialog, `[ Select ]`, `[ Back ]` and `[ Cancel ]` in the install picker, and so on for
+the rest, including the first-run setup. In the
 install picker a click on a row chooses it, and on the custom ISO's settings a
 click on a row selects it and on its `‹` or `›` changes it. While the TUI has the mouse,
 most terminals still select text with shift held; `-no-mouse` turns it off.
@@ -97,9 +106,9 @@ The keys below are shortcuts that work **inside the actions menu only**: pressin
 | c / a / d | create snapshot / revert / delete: `a` opens a picker (enter reverts, `s` reverts then starts, both after confirming); `d` opens a checklist (space ticks, `a` ticks all, enter deletes the ticked ones after confirming) |
 | z | resize the disk (VM off): grow it by +10G/+20G/+50G/+100G, or pick *Other size…* and type one: `64G` sets the size, `+20G` adds, `-5G` takes away. A shrink is allowed behind a strong warning, as it destroys what the guest keeps past the new end. Grows leave the guest's partitions alone (an installer uses the new space; an installed system needs them grown inside the guest). Reverting to a snapshot restores the disk size it was taken at, and a revert that changes the size says so. The `.conf`'s `disk_size` is updated to match |
 | m | removable media: swap or eject ISOs on a running VM |
-| Q | quick settings: pick the number of CPUs and the memory (the same choices as a new install, or `auto`), the display (`auto`, 800x600, 1024x768, 1920x1080 or fullscreen), tick OpenGL on or off and tick SPICE display on or off (`display="spice"`, or the key removed); on closing, what changed is written to the `.conf` (`cpu_cores=`/`ram=` set, or removed for `auto`; `width=`/`height=` for a size, or `fullscreen="on"`, which quickemu-tui passes to quickemu as `--fullscreen`; `gl="on"`/`"off"`), applying on the next start |
+| Q | quick settings: pick the number of CPUs and the memory (the same choices as a new install, or `auto`), the display (`auto`, 800x600, 1024x768, 1920x1080 or fullscreen), tick OpenGL on or off and tick SPICE display on or off (`display="spice"`, or the key removed); `Save` writes what changed to the `.conf` (`Cancel`, esc and a click outside discard it) (`cpu_cores=`/`ram=` set, or removed for `auto`; `width=`/`height=` for a size, or `fullscreen="on"`, which quickemu-tui passes to quickemu as `--fullscreen`; `gl="on"`/`"off"`), applying on the next start |
 | e | edit the `.conf` in `$VISUAL`/`$EDITOR` (nano if unset) |
-| l | logs: quickemu's log, the launch output, the generated launch script |
+| l | logs: quickemu's log, the launch output, the generated launch script (← and → switch file) |
 | x | ssh in via the forwarded port |
 | o | open the VM folder |
 | R | rename the VM: its `.conf`, its folder and the paths in the `.conf` that point into it (not while it runs) |
@@ -197,7 +206,7 @@ be redirected to plain `http`. Whatever arrives must pass for an ISO (a `.img` i
    deletes the image and creates no VM. Leaving it blank works, but the
    confirmation and the finished message say the image wasn't checked;
 4. the system type (`guest_os`), boot mode and disk size, on one screen with
-   `linux`, `efi` and `32G` already chosen (enter accepts them). The system
+   `linux`, `efi` and `32G` already chosen (the Next button accepts them). The system
    type isn't a label: quickemu picks the virtual hardware from it, and an
    unknown value quietly gets a generic profile, so only the values quickemu
    treats specially are offered (not `macos`, which needs more than an ISO).
@@ -207,7 +216,7 @@ be redirected to plain `http`. Whatever arrives must pass for an ISO (a `.img` i
 
 If `<name>/disk.qcow2` already exists (a leftover from a VM whose `.conf` is
 gone), the confirmation warns that the new VM will use it and installing will
-overwrite what's on it, and enter then means no. An image that finished
+overwrite what's on it, and the default button is then No. An image that finished
 downloading is remembered (in `<name>/.quickemu-tui-fetch`) until the VM is
 made, so trying again after a later failure doesn't download it again.
 

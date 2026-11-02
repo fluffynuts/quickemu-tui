@@ -38,6 +38,8 @@ const fullHelp = `  d  default VM options (e.g. gl="off"): added to new VMs, and
            (s start, p shutdown, K force stop, c create, a revert, d delete snapshots, z resize disk, m media,
            Q quick settings, e edit, l logs, x ssh, o open folder, R rename VM, D delete VM) or move to it and press enter.
   mouse    click a VM to select it, click it again (or right-click) for its menu, click an item to run it, [x] closes a dialog
+  dialogs  tab/shift-tab: fields, then buttons (the default is first, green). enter or space presses a
+           focused button; esc cancels. In the logs, ← → switch file.
   ?  toggle help         q      quit (VMs keep running)`
 
 // View renders the UI.
