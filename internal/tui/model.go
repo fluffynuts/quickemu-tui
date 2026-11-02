@@ -1296,11 +1296,11 @@ func (m Model) handleLogsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "q":
 		m.mode = modeNormal
 		return m, nil
-	case "tab":
+	case "right":
 		m.logIndex = (m.logIndex + 1) % len(logNames)
 		m.loadLog()
 		return m, nil
-	case "shift+tab":
+	case "left":
 		m.logIndex = (m.logIndex + len(logNames) - 1) % len(logNames)
 		m.loadLog()
 		return m, nil

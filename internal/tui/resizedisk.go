@@ -136,5 +136,5 @@ func (m Model) viewResize() string {
 	if m.resCursor == resizeOtherRow {
 		other = selStyle.Render(other)
 	}
-	return strings.Join(append(lines, other), "\n")
+	return strings.Join(append(lines, other, "", m.buttonRow()), "\n")
 }

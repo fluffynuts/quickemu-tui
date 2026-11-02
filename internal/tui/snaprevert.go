@@ -82,5 +82,5 @@ func (m Model) viewSnapRevert() string {
 	}
 	rows := max(3, min(len(items), m.height-14))
 	lines = append(lines, windowAround(items, cursor, rows)...)
-	return strings.Join(lines, "\n")
+	return strings.Join(append(lines, "", m.buttonRow()), "\n")
 }

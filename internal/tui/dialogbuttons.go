@@ -32,7 +32,10 @@ func keyPress(key tea.KeyMsg) func(Model) (tea.Model, tea.Cmd) {
 	}
 }
 
-var keyEnter = tea.KeyMsg{Type: tea.KeyEnter}
+var (
+	keyEnter = tea.KeyMsg{Type: tea.KeyEnter}
+	keyEsc   = tea.KeyMsg{Type: tea.KeyEsc}
+)
 
 func runeKey(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
 
@@ -134,17 +137,48 @@ func (m Model) dialogButtons() []dialogButton {
 			m.mode = modeNormal
 			return m, nil
 		}})
+	case modeMenu:
+		return []dialogButton{
+			{label: "Run", press: keyPress(keyEnter)},
+			{label: "Close", press: keyPress(keyEsc)},
+		}
+	case modeSnapRevert:
+		return []dialogButton{
+			{label: "Revert", press: keyPress(keyEnter)},
+			{label: "Revert and start", hotkey: 's', press: keyPress(runeKey('s'))},
+			{label: "Cancel", press: keyPress(keyEsc)},
+		}
+	case modeSnapDelete:
+		return []dialogButton{
+			{label: "Delete ticked", press: keyPress(keyEnter)},
+			{label: "Cancel", press: keyPress(keyEsc)},
+		}
+	case modeResize:
+		return []dialogButton{
+			{label: "Choose", press: keyPress(keyEnter)},
+			{label: "Cancel", press: keyPress(keyEsc)},
+		}
+	case modeMedia:
+		return []dialogButton{
+			{label: "Insert…", press: keyPress(runeKey('c'))},
+			{label: "Eject", hotkey: 'e', press: keyPress(runeKey('e'))},
+			{label: "Reload", hotkey: 'r', press: keyPress(runeKey('r'))},
+			{label: "Close", press: keyPress(keyEsc)},
+		}
+	case modeLogs:
+		return []dialogButton{
+			{label: "Reload", hotkey: 'r', press: keyPress(runeKey('r'))},
+			{label: "Close", press: keyPress(keyEsc)},
+		}
+	case modeError:
+		return []dialogButton{{label: "Close", press: keyPress(keyEsc)}}
+	case modeDefaults:
+		return []dialogButton{
+			{label: "Save", press: func(m Model) (tea.Model, tea.Cmd) { return m.saveDefaults() }},
+			{label: "Cancel", press: keyPress(keyEsc)},
+		}
 	}
 	return nil
-}
-
-// usesButtonFocus is whether the dialog's buttons are in its tab order.
-func (m Model) usesButtonFocus() bool {
-	switch m.mode {
-	case modeConfirm, modePrompt, modeQuickSettings, modeInstallProgress, modeInstallPick:
-		return true
-	}
-	return false
 }
 
 // bodyStops is how many tab stops the open dialog has before its buttons:
@@ -152,7 +186,7 @@ func (m Model) usesButtonFocus() bool {
 // for a plain question.
 func (m Model) bodyStops() int {
 	switch m.mode {
-	case modePrompt:
+	case modePrompt, modeMenu, modeSnapRevert, modeSnapDelete, modeResize, modeMedia, modeLogs, modeError, modeDefaults:
 		return 1
 	case modeQuickSettings:
 		return qsFocuses
@@ -217,7 +251,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // and presses a focused button. It reports whether it used the key.
 func (m Model) handleDialogFocusKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	buttons := m.dialogButtons()
-	if len(buttons) == 0 || !m.usesButtonFocus() {
+	if len(buttons) == 0 {
 		return m, nil, false
 	}
 	switch msg.String() {
@@ -280,12 +314,19 @@ func (m *Model) moveFocus(buttons, dir int) {
 // syncTextFocus gives the dialog's text box the cursor only while the focus is
 // on it.
 func (m *Model) syncTextFocus() tea.Cmd {
-	if m.mode != modePrompt {
-		return nil
+	switch m.mode {
+	case modePrompt:
+		if m.btnFocused {
+			m.input.Blur()
+			return nil
+		}
+		return m.input.Focus()
+	case modeDefaults:
+		if m.btnFocused {
+			m.defInput.Blur()
+			return nil
+		}
+		return m.defInput.Focus()
 	}
-	if m.btnFocused {
-		m.input.Blur()
-		return nil
-	}
-	return m.input.Focus()
+	return nil
 }

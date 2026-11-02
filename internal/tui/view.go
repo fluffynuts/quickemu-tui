@@ -165,9 +165,9 @@ func (m Model) viewKeys() string {
 	case modeConfirm:
 		keys = "y yes • n no • tab buttons • enter presses the focused one • esc cancel"
 	case modeMedia:
-		keys = "↑↓ select • enter/c insert image • e eject • r refresh • esc close"
+		keys = "↑↓ select • enter/c insert image • e eject • r refresh • tab buttons • esc close"
 	case modeDefaults:
-		keys = "ctrl+s save • esc discard"
+		keys = "ctrl+s save • tab buttons • esc cancel"
 	case modeQuickSettings:
 		keys = "↑↓ choose • space tick • tab/shift-tab move • esc cancel"
 	case modeInstallPick:
@@ -178,17 +178,17 @@ func (m Model) viewKeys() string {
 	case modeInstallProgress:
 		keys = "esc keep running in background • c cancel • tab buttons"
 	case modeError:
-		keys = "↑↓ pgup pgdn home end scroll • esc/enter close"
+		keys = "↑↓ pgup pgdn home end scroll • tab buttons • esc close"
 	case modeSnapDelete:
-		keys = "↑↓ move • space tick • a all/none • enter delete ticked • esc cancel"
+		keys = "↑↓ move • space tick • a all/none • enter delete ticked • tab buttons • esc cancel"
 	case modeSnapRevert:
-		keys = "↑↓ move • enter revert • s revert and start • esc cancel"
+		keys = "↑↓ move • enter revert • s revert and start • tab buttons • esc cancel"
 	case modeResize:
-		keys = "↑↓ move • enter choose • esc cancel"
+		keys = "↑↓ move • enter choose • tab buttons • esc cancel"
 	case modeMenu:
-		keys = "↑↓ select • enter or item key run • esc close"
+		keys = "↑↓ select • enter or item key run • tab buttons • esc close"
 	case modeLogs:
-		keys = "tab next file • r reload • ↑↓ pgup pgdn scroll • esc close"
+		keys = "←/→ switch log file • r reload • ↑↓ pgup pgdn scroll • tab buttons • esc close"
 	default:
 		if m.showHelp {
 			return dimStyle.Render(fullHelp)
@@ -427,9 +427,9 @@ func (m Model) viewModal() string {
 		return modalStyle.Render(m.viewInstallProgress())
 	case modeError:
 		if m.errNotice {
-			return modalStyle.Padding(0, 1).Render(titleStyle.Render(m.errTitle) + "\n\n" + m.errView.View())
+			return modalStyle.Padding(0, 1).Render(titleStyle.Render(m.errTitle) + "\n\n" + m.errView.View() + "\n\n" + m.buttonRow())
 		}
-		return modalStyle.BorderForeground(lipgloss.Color("9")).Padding(0, 1).Render(errStyle.Render(m.errTitle) + "\n\n" + m.errView.View())
+		return modalStyle.BorderForeground(lipgloss.Color("9")).Padding(0, 1).Render(errStyle.Render(m.errTitle) + "\n\n" + m.errView.View() + "\n\n" + m.buttonRow())
 	case modeLogs:
 		return modalStyle.Padding(0, 1).Render(m.viewLogs())
 	}
@@ -462,7 +462,7 @@ func (m Model) viewMedia() string {
 		}
 		lines = append(lines, line)
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(append(lines, "", m.buttonRow()), "\n")
 }
 
 func (m Model) viewLogs() string {
@@ -478,7 +478,8 @@ func (m Model) viewLogs() string {
 	if vm, ok := m.selected(); ok {
 		vmName = vm.Name()
 	}
-	return titleStyle.Render("Logs: "+vmName) + "  " + strings.Join(tabs, " ") + "\n" + m.logView.View()
+	return titleStyle.Render("Logs: "+vmName) + "  " + strings.Join(tabs, " ") + "  " + dimStyle.Render("← → switch file") + "\n" +
+		m.logView.View() + "\n\n" + m.buttonRow()
 }
 
 // --- helpers ----------------------------------------------------------------

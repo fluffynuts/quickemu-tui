@@ -112,7 +112,7 @@ func (m Model) viewDefaults() string {
 	if m.defErr != "" {
 		lines = append(lines, "", errStyle.Render(trunc(m.defErr, max(30, min(70, m.width-12)))))
 	}
-	lines = append(lines, "", dimStyle.Render("ctrl+s save • esc discard"))
+	lines = append(lines, "", m.buttonRow(), "", dimStyle.Render("ctrl+s save • tab buttons • esc cancel"))
 	return strings.Join(lines, "\n")
 }
 

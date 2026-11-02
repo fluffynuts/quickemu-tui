@@ -137,7 +137,7 @@ func (m Model) viewMenu() string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "", dimStyle.Render("↑↓ select • enter/key/click run • esc close"))
+	lines = append(lines, "", m.buttonRow(), "", dimStyle.Render("↑↓ select • enter/key/click run • esc close"))
 	return modalStyle.Render(strings.Join(lines, "\n"))
 }
 

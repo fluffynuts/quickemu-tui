@@ -53,7 +53,7 @@ func (m Model) handleErrorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m.interruptQuit()
-	case "esc", "q", "enter":
+	case "esc", "q":
 		m.mode = m.errReturn
 		return m, nil
 	case "home", "g":

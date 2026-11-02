@@ -135,6 +135,6 @@ func (m Model) viewSnapDelete() string {
 	}
 	rows := max(3, min(len(items), m.height-14))
 	lines = append(lines, windowAround(items, cursor, rows)...)
-	lines = append(lines, "", dimStyle.Render(fmt.Sprintf("%d of %d ticked", len(m.pickedSnapshots(snaps)), len(snaps))))
+	lines = append(lines, "", dimStyle.Render(fmt.Sprintf("%d of %d ticked", len(m.pickedSnapshots(snaps)), len(snaps))), "", m.buttonRow())
 	return strings.Join(lines, "\n")
 }
