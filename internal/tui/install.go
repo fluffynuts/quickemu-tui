@@ -102,7 +102,8 @@ func (m Model) onCatalog(msg catalogMsg) (tea.Model, tea.Cmd) {
 			}
 			m.firstFetch = true
 			m.catalogLoading = true
-			return m, batch(m.ensureSpin(), fetchCatalogCmd(m.bg, m.opts.Quickemu, m.opts.CachePath))
+			cmd := batch(m.ensureSpin(), fetchCatalogCmd(m.bg, m.opts.Quickemu, m.opts.CachePath))
+			return m, cmd
 		}
 		// an old list is better than none; a fresher one replaces it when it arrives
 		if len(m.catalog) == 0 {
@@ -113,7 +114,8 @@ func (m Model) onCatalog(msg catalogMsg) (tea.Model, tea.Cmd) {
 			m.catalogLoading = true
 			refresh = fetchCatalogCmd(m.bg, m.opts.Quickemu, m.opts.CachePath)
 		}
-		return m, batch(refresh, m.prefetchReleaseDatesCmd())
+		cmd := batch(refresh, m.prefetchReleaseDatesCmd())
+		return m, cmd
 	}
 	m.catalogLoading = false
 	m.catalogErr = msg.err
@@ -125,7 +127,8 @@ func (m Model) onCatalog(msg catalogMsg) (tea.Model, tea.Cmd) {
 			// it'll be fetched again next time; say why
 			m.setFlash("Couldn't save the list of installable systems: "+firstLine(msg.saveErr.Error()), true)
 		}
-		return m, m.prefetchReleaseDatesCmd()
+		cmd := m.prefetchReleaseDatesCmd()
+		return m, cmd
 	}
 	if wasFirst {
 		m.setFlash("Couldn't list installable systems: "+firstLine(msg.err.Error()), true)
@@ -395,7 +398,8 @@ func (m Model) pickItem(it pickItem) (tea.Model, tea.Cmd) {
 			m.instRelease = m.catalog.Releases(it.value)[0]
 			return m.afterRelease()
 		}
-		return m, m.releaseDatesCmd(it.value)
+		cmd := m.releaseDatesCmd(it.value)
+		return m, cmd
 	case stepRelease:
 		m.instRelease = it.value
 		return m.afterRelease()
@@ -605,7 +609,8 @@ func (m Model) onInstallDone(msg installDoneMsg) (tea.Model, tea.Cmd) {
 		m.reportInstalled(st, msg)
 	}
 	m.rediscover()
-	return m, batch(m.pollNow(), m.loadSelectedDisk())
+	cmd := batch(m.pollNow(), m.loadSelectedDisk())
+	return m, cmd
 }
 
 // reportInstalled tells the user how a finished install went: a plain success,

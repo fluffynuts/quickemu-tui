@@ -672,7 +672,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.rediscover()
-		return m, batch(tick(), m.pollNow())
+		cmd := batch(tick(), m.pollNow())
+		return m, cmd
 
 	case catalogMsg:
 		next, cmd := m.onCatalog(msg)
@@ -699,7 +700,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onInstallDone(msg)
 
 	case pollNowMsg:
-		return m, m.pollNow()
+		cmd := m.pollNow()
+		return m, cmd
 
 	case infoMsg:
 		m.pollInFlight = false
@@ -769,7 +771,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFlash(fmt.Sprintf("quickemu exited (%v): %s", msg.err, detail), true)
 			m.showError("quickemu exited", fmt.Sprintf("%v\n\n%s", msg.err, detail))
 		}
-		return m, m.pollNow()
+		cmd := m.pollNow()
+		return m, cmd
 
 	case mediaMsg:
 		m.mediaLoading = false
@@ -819,10 +822,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.firstFetch || m.quitWhenIdle {
 			switch msg.String() {
 			case "ctrl+c":
-				return m, m.quitNow()
+				cmd := m.quitNow()
+				return m, cmd
 			case "q":
 				if m.firstFetch {
-					return m, m.quitNow()
+					cmd := m.quitNow()
+					return m, cmd
 				}
 			}
 			return m, nil
@@ -896,7 +901,8 @@ func (m Model) quit(offerWait bool) (tea.Model, tea.Cmd) {
 		m.askConfirm("An operation is still running. Quit anyway?", defaultNo, func(m *Model) tea.Cmd { return m.finishQuit(offerWait) })
 		return m, nil
 	}
-	return m, m.finishQuit(offerWait)
+	cmd := m.finishQuit(offerWait)
+	return m, cmd
 }
 
 // refreshing reports whether the installable-systems list or release dates
@@ -929,7 +935,8 @@ func (m *Model) quitNow() tea.Cmd {
 // done; until then it passes cmd on (which may start the next part of it).
 func (m Model) quitIfIdle(cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	if m.quitWhenIdle && !m.refreshing() {
-		return m, m.quitNow()
+		cmd := m.quitNow()
+		return m, cmd
 	}
 	return m, cmd
 }
@@ -970,7 +977,8 @@ func (m Model) submitPrompt() (tea.Model, tea.Cmd) {
 func (m Model) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+c":
-		return m, m.quitNow()
+		cmd := m.quitNow()
+		return m, cmd
 	case "y", "Y":
 		return m.acceptConfirm()
 	case "n", "N":
@@ -1024,19 +1032,24 @@ func (m Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "up", "k":
-		return m, m.move(-1)
+		cmd := m.move(-1)
+		return m, cmd
 	case "down", "j":
-		return m, m.move(1)
+		cmd := m.move(1)
+		return m, cmd
 	case "r":
 		m.rediscover()
-		return m, batch(m.pollNow(), m.loadSelectedDisk())
+		cmd := batch(m.pollNow(), m.loadSelectedDisk())
+		return m, cmd
 	case "enter":
 		m.openMenu()
 		return m, nil
 	case "n":
-		return m, m.openInstall()
+		cmd := m.openInstall()
+		return m, cmd
 	case "d":
-		return m, m.openDefaults()
+		cmd := m.openDefaults()
+		return m, cmd
 	}
 	return m, nil
 }
@@ -1059,13 +1072,15 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "s":
 		if up && !info.spice.IsZero() {
-			return m, m.openSpiceViewer(vm, info.spice)
+			cmd := m.openSpiceViewer(vm, info.spice)
+			return m, cmd
 		}
 		if up {
 			m.setFlash(vm.Name()+" is already running", true)
 			return m, nil
 		}
-		return m, m.startVM(vm)
+		cmd := m.startVM(vm)
+		return m, cmd
 
 	case "p":
 		if !info.status.IsUp() {
@@ -1076,9 +1091,10 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 			m.setFlash("The monitor isn't answering (another client attached?); try K", true)
 			return m, nil
 		}
-		return m, m.startOp("ACPI shutdown sent to "+vm.Name(), vm, opDoneMsg{}, func() error {
+		cmd := m.startOp("ACPI shutdown sent to "+vm.Name(), vm, opDoneMsg{}, func() error {
 			return qemu.Shutdown(vm)
 		})
+		return m, cmd
 
 	case "K":
 		if !up {
@@ -1134,7 +1150,7 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		conf := vm.ConfPath
-		return m, m.askPrompt("SSH into "+vm.Name()+" as user", "Connect", m.sshUserDefault(), func(m *Model, user string) tea.Cmd {
+		cmd := m.askPrompt("SSH into "+vm.Name()+" as user", "Connect", m.sshUserDefault(), func(m *Model, user string) tea.Cmd {
 			if user == "" {
 				return nil
 			}
@@ -1144,6 +1160,7 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 				return execDoneMsg{label: "ssh session", conf: conf, err: err}
 			})
 		})
+		return m, cmd
 
 	case "o":
 		p, err := vm.Paths()
@@ -1172,7 +1189,7 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 		if len(m.snapshots(vm)) > 0 {
 			initial = "snap-" + time.Now().Format("20060102-1504")
 		}
-		return m, m.askPrompt("New snapshot tag for "+vm.Name(), "Save", initial, func(m *Model, tag string) tea.Cmd {
+		cmd := m.askPrompt("New snapshot tag for "+vm.Name(), "Save", initial, func(m *Model, tag string) tea.Cmd {
 			if err := qemu.ValidateTag(tag); err != nil {
 				m.setFlash(err.Error(), true)
 				return nil
@@ -1181,13 +1198,15 @@ func (m Model) runAction(key string) (tea.Model, tea.Cmd) {
 				return qemu.CreateSnapshot(vm, tag)
 			})
 		})
+		return m, cmd
 
 	case "R":
 		if up {
 			m.setFlash("Shut "+vm.Name()+" down first: a running VM can't be renamed", true)
 			return m, nil
 		}
-		return m, m.askRenameVM(vm)
+		cmd := m.askRenameVM(vm)
+		return m, cmd
 
 	case "D":
 		if up {
@@ -1264,9 +1283,10 @@ func (m Model) handleMediaKey(key string) (tea.Model, tea.Cmd) {
 		}
 		dev := m.media[m.mediaCursor]
 		if key == "e" {
-			return m, m.startOp("Eject "+dev.Name, vm, opDoneMsg{refreshMedia: true}, func() error {
+			cmd := m.startOp("Eject "+dev.Name, vm, opDoneMsg{refreshMedia: true}, func() error {
 				return qemu.EjectMedia(vm, dev.Name)
 			})
+			return m, cmd
 		}
 		initial := ""
 		if dev.File != "" {
@@ -1274,7 +1294,7 @@ func (m Model) handleMediaKey(key string) (tea.Model, tea.Cmd) {
 		} else if p, err := vm.Paths(); err == nil {
 			initial = p.VMDir + string(os.PathSeparator)
 		}
-		return m, m.askPrompt("Image to insert into "+dev.Name, "Insert", initial, func(m *Model, value string) tea.Cmd {
+		cmd := m.askPrompt("Image to insert into "+dev.Name, "Insert", initial, func(m *Model, value string) tea.Cmd {
 			if value == "" {
 				return nil
 			}
@@ -1287,6 +1307,7 @@ func (m Model) handleMediaKey(key string) (tea.Model, tea.Cmd) {
 				return qemu.ChangeMedia(vm, dev.Name, path)
 			})
 		})
+		return m, cmd
 	}
 	return m, nil
 }

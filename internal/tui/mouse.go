@@ -88,7 +88,8 @@ func (m Model) mouseMain(msg tea.MouseMsg, wheel int) (tea.Model, tea.Cmd) {
 	}
 	if wheel != 0 {
 		m.pane = clicked
-		return m, m.move(wheel)
+		cmd := m.move(wheel)
+		return m, cmd
 	}
 	if clicked == paneVMs {
 		// the pane's border and its "VMs" title come before the rows

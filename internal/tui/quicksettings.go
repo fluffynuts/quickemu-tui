@@ -230,7 +230,8 @@ func (m Model) saveQuickSettings() (tea.Model, tea.Cmd) {
 	m.setFlash(fmt.Sprintf("%s: CPUs %s, memory %s, display %s, gl %s, spice %s (applies on next start)",
 		qs.vm.Name(), or(qs.picked(qsCPU), "auto"), or(qs.picked(qsRAM), "auto"),
 		or(qs.picked(qsDisplay), "auto"), onOff(qs.gl), onOff(qs.spice)), false)
-	return m, m.pollNow()
+	cmd := m.pollNow()
+	return m, cmd
 }
 
 // qsButton is the label of the button that saves.
