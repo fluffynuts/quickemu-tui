@@ -161,12 +161,9 @@ func (m Model) viewKeys() string {
 	keys := shortKeys
 	switch m.mode {
 	case modePrompt:
-		keys = "enter confirm • esc cancel"
+		keys = "enter submit • tab buttons • esc cancel"
 	case modeConfirm:
-		keys = "y yes • n no • enter no"
-		if m.confirmDefault == defaultYes {
-			keys = "y yes • n no • enter yes"
-		}
+		keys = "y yes • n no • tab buttons • enter presses the focused one • esc cancel"
 	case modeMedia:
 		keys = "↑↓ select • enter/c insert image • e eject • r refresh • esc close"
 	case modeDefaults:
@@ -383,13 +380,9 @@ func (m Model) dialogBox() string {
 	return withClose(m.viewModal())
 }
 
-// button draws a clickable button (see dialogButton).
+// button draws a button that isn't part of a dialog's tab order (yet).
 func button(label string) string {
 	return titleStyle.Render(buttonText(label))
-}
-
-func buttonText(label string) string {
-	return "[ " + label + " ]"
 }
 
 // closeButton sits in a dialog's top border, this far in from its right edge.
@@ -413,10 +406,9 @@ func withClose(box string) string {
 func (m Model) viewModal() string {
 	switch m.mode {
 	case modePrompt:
-		return modalStyle.Render(titleStyle.Render(m.promptTitle) + "\n\n" + m.input.View() + "\n\n" + button(m.promptButton))
+		return modalStyle.Render(titleStyle.Render(m.promptTitle) + "\n\n" + m.input.View() + "\n\n" + m.buttonRow())
 	case modeConfirm:
-		return modalStyle.Width(max(30, min(70, m.width-4))).Render(m.confirmText + "\n\n" +
-			button(confirmYes) + "  " + button(confirmNo) + "  " + dimStyle.Render(m.confirmChoices()))
+		return modalStyle.Width(max(30, min(70, m.width-4))).Render(m.confirmText + "\n\n" + m.buttonRow())
 	case modeMedia:
 		return modalStyle.Render(m.viewMedia())
 	case modeSnapDelete:
@@ -448,14 +440,6 @@ const (
 	confirmYes = "Yes"
 	confirmNo  = "No"
 )
-
-// confirmChoices is the y/n hint, with the enter default capitalised.
-func (m Model) confirmChoices() string {
-	if m.confirmDefault == defaultYes {
-		return "Y/n"
-	}
-	return "y/N"
-}
 
 func (m Model) viewMedia() string {
 	lines := []string{titleStyle.Render("Removable media: " + m.mediaVM.Name()), ""}

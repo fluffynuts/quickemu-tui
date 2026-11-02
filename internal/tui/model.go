@@ -116,6 +116,10 @@ type Model struct {
 	flash    string
 	flashErr bool
 
+	btnFocused   bool // a dialog button has the focus (see dialogbuttons.go)
+	btnIdx       int  // which of dialogButtons()
+	dialogSerial int  // bumped by each question asked, so a new one starts unfocused
+
 	updateAvailable string // version of a newer release, once the background check has found one
 
 	input        textinput.Model
@@ -557,6 +561,8 @@ func (m *Model) openSpiceViewer(vm qemu.VM, target qemu.SpiceTarget) tea.Cmd {
 // askPrompt asks for a line of text, starting from initial. Enter, or
 // clicking the button labelled button, passes it to onSubmit.
 func (m *Model) askPrompt(title, button, initial string, onSubmit func(m *Model, value string) tea.Cmd) tea.Cmd {
+	m.dialogSerial++
+	m.btnFocused = false
 	m.returnMode = m.mode
 	m.mode = modePrompt
 	m.promptTitle = title
@@ -578,6 +584,8 @@ const (
 )
 
 func (m *Model) askConfirm(text string, def confirmDefault, onYes func(m *Model) tea.Cmd) {
+	m.dialogSerial++
+	m.btnFocused = false
 	m.returnMode = m.mode
 	m.mode = modeConfirm
 	m.confirmText = text
@@ -635,7 +643,7 @@ func clamp(v, lo, hi int) int {
 // --- update -----------------------------------------------------------------
 
 // Update handles messages.
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -817,6 +825,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if next, cmd, ok := m.handleDialogFocusKey(msg); ok {
+			return next, cmd
+		}
 		switch m.mode {
 		case modePrompt:
 			return m.handlePromptKey(msg)
@@ -926,34 +937,38 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m.interruptQuit()
 	case "esc":
-		m.mode = m.returnMode
-		m.input.Blur()
-		return m, nil
+		return m.cancelPrompt()
 	case "enter":
-		value := strings.TrimSpace(m.input.Value())
-		m.mode = m.returnMode
-		m.input.Blur()
-		fn := m.onSubmit
-		m.onSubmit = nil
-		if fn == nil {
-			return m, nil
-		}
-		return m, fn(&m, value)
+		return m.submitPrompt()
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
 }
 
+func (m Model) cancelPrompt() (tea.Model, tea.Cmd) {
+	m.mode = m.returnMode
+	m.input.Blur()
+	m.onSubmit = nil
+	return m, nil
+}
+
+func (m Model) submitPrompt() (tea.Model, tea.Cmd) {
+	value := strings.TrimSpace(m.input.Value())
+	m.mode = m.returnMode
+	m.input.Blur()
+	fn := m.onSubmit
+	m.onSubmit = nil
+	if fn == nil {
+		return m, nil
+	}
+	return m, fn(&m, value)
+}
+
 func (m Model) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+c":
 		return m, m.quitNow()
-	case "enter":
-		if m.confirmDefault == defaultYes {
-			return m.acceptConfirm()
-		}
-		return m.declineConfirm(true)
 	case "y", "Y":
 		return m.acceptConfirm()
 	case "n", "N":

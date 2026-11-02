@@ -620,10 +620,15 @@ func TestQuitCanWaitForTheBackgroundRefresh(t *testing.T) {
 	if m.mode != modeConfirm || m.confirmText != waitPrompt || cmd != nil {
 		t.Fatalf("mode=%v text=%q", m.mode, m.confirmText)
 	}
-	if v := m.View(); !strings.Contains(v, "y/N") {
-		t.Errorf("no should be the default:\n%s", v)
+	if v := m.View(); strings.Index(v, "[ No ]") < 0 || strings.Index(v, "[ No ]") > strings.Index(v, "[ Yes ]") {
+		t.Errorf("no should be the default, so first:\n%s", v)
 	}
-	m, _ = keyOf(m, enter) // the default: don't abort
+	m, _ = keyOf(m, enter)
+	if m.mode != modeConfirm {
+		t.Fatal("enter answered a question that nothing had focused")
+	}
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = keyOf(m, enter) // the focused default: don't abort
 	if !m.quitWhenIdle || !strings.Contains(m.View(), "finishing the background download") {
 		t.Fatalf("not waiting: quitWhenIdle=%v\n%s", m.quitWhenIdle, m.View())
 	}

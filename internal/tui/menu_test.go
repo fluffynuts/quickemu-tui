@@ -161,25 +161,26 @@ func TestRevertSnapshotPicker(t *testing.T) {
 	}
 }
 
-func TestConfirmEnterTakesTheDefault(t *testing.T) {
+func TestConfirmTabThenEnterTakesTheDefault(t *testing.T) {
 	for _, tc := range []struct {
 		def      confirmDefault
-		hint     string
 		accepted bool
 	}{
-		{defaultNo, "y/N", false},
-		{defaultYes, "Y/n", true},
+		{defaultNo, false},
+		{defaultYes, true},
 	} {
 		m := New(Options{Root: t.TempDir()})
 		m.width, m.height = 100, 30
 		accepted := false
 		m.askConfirm("Sure?", tc.def, func(*Model) tea.Cmd { accepted = true; return nil })
-		if v := m.viewModal(); !strings.Contains(v, tc.hint) {
-			t.Errorf("%s: prompt lacks hint:\n%s", tc.hint, v)
-		}
 		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if accepted || next.(Model).mode != modeConfirm {
+			t.Errorf("default %v: enter alone answered", tc.def)
+		}
+		next, _ = next.Update(tea.KeyMsg{Type: tea.KeyTab})
+		next, _ = next.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		if accepted != tc.accepted || next.(Model).mode != modeNormal {
-			t.Errorf("%s: enter accepted=%v mode=%v, want accepted=%v and closed", tc.hint, accepted, next.(Model).mode, tc.accepted)
+			t.Errorf("default %v: tab, enter accepted=%v mode=%v, want accepted=%v and closed", tc.def, accepted, next.(Model).mode, tc.accepted)
 		}
 	}
 }
@@ -204,9 +205,10 @@ func TestDestructiveConfirmsDefaultToNo(t *testing.T) {
 	if m.mode != modeConfirm || m.confirmDefault != defaultNo {
 		t.Fatalf("revert: mode=%v default=%v, want a y/N confirm", m.mode, m.confirmDefault)
 	}
+	m = key(m, tea.KeyMsg{Type: tea.KeyTab}) // the default: No
 	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.mode != modeSnapRevert || m.busy != 0 {
-		t.Fatalf("enter should decline back to the picker: mode=%v busy=%d", m.mode, m.busy)
+		t.Fatalf("the default should decline back to the picker: mode=%v busy=%d", m.mode, m.busy)
 	}
 
 	m.mode = modeNormal

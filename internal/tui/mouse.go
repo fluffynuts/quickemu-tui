@@ -47,8 +47,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m.closeDialog()
 	}
 	if wheel == 0 {
-		if key, ok := m.clickedDialogButton(msg); ok {
-			return m.Update(key)
+		if b, ok := m.clickedDialogButton(msg); ok {
+			return b.press(m)
 		}
 	}
 	switch m.mode {
@@ -130,39 +130,11 @@ func (m Model) onCloseButton(msg tea.MouseMsg) bool {
 	return msg.Y == y && msg.X >= left && msg.X < left+lipgloss.Width(closeButton)
 }
 
-// dialogButton is a button a dialog draws; clicking it presses key.
-type dialogButton struct {
-	label string
-	key   tea.KeyMsg
-}
-
-func runeKey(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
-
-// dialogButtons are the buttons the open dialog draws, if any.
-func (m Model) dialogButtons() []dialogButton {
-	enter := tea.KeyMsg{Type: tea.KeyEnter}
-	switch m.mode {
-	case modePrompt:
-		return []dialogButton{{m.promptButton, enter}}
-	case modeQuickSettings:
-		return []dialogButton{{qsButton, enter}}
-	case modeConfirm:
-		return []dialogButton{{confirmYes, runeKey('y')}, {confirmNo, runeKey('n')}}
-	case modeInstallProgress:
-		return []dialogButton{{progressBackground, tea.KeyMsg{Type: tea.KeyEsc}}, {progressCancel, runeKey('c')}}
-	case modeInstallPick:
-		if m.instStep == stepCustomOptions {
-			return []dialogButton{{customNextButton, enter}}
-		}
-	}
-	return nil
-}
-
-// clickedDialogButton is the key of the dialog button under the click, if one is.
-func (m Model) clickedDialogButton(msg tea.MouseMsg) (tea.KeyMsg, bool) {
+// clickedDialogButton is the dialog button under the click, if one is.
+func (m Model) clickedDialogButton(msg tea.MouseMsg) (dialogButton, bool) {
 	buttons := m.dialogButtons()
 	if len(buttons) == 0 {
-		return tea.KeyMsg{}, false
+		return dialogButton{}, false
 	}
 	box := m.dialogBox()
 	x, y := m.modalAt(box)
@@ -174,13 +146,13 @@ func (m Model) clickedDialogButton(msg tea.MouseMsg) (tea.KeyMsg, bool) {
 			if before, _, found := strings.Cut(lines[i], text); found {
 				left := x + ansi.StringWidth(before)
 				if msg.Y == y+i && msg.X >= left && msg.X < left+ansi.StringWidth(text) {
-					return b.key, true
+					return b, true
 				}
 				break
 			}
 		}
 	}
-	return tea.KeyMsg{}, false
+	return dialogButton{}, false
 }
 
 // closeDialog is what esc does in the open dialog, except that the install

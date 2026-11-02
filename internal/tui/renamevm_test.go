@@ -34,7 +34,8 @@ func TestRenameVMFlowSelectsTheRenamedVM(t *testing.T) {
 	if m.mode != modeConfirm || m.confirmDefault != defaultYes || !strings.Contains(m.confirmText, "alpha/ → ") {
 		t.Fatalf("mode=%v default=%v confirm=%q", m.mode, m.confirmDefault, m.confirmText)
 	}
-	m, cmd := keyOf(m, tea.KeyMsg{Type: tea.KeyEnter}) // Y/n: enter renames
+	m, _ = keyOf(m, tea.KeyMsg{Type: tea.KeyTab}) // the default, Yes
+	m, cmd := keyOf(m, tea.KeyMsg{Type: tea.KeyEnter})
 
 	var done opDoneMsg
 	var collect func(tea.Cmd)
