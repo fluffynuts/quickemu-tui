@@ -40,6 +40,12 @@ latest GitHub release for your platform, checks it against the release's
 latest. The binary has to be in a directory you can write to; otherwise run it
 with `sudo`.
 
+While it runs, quickemu-tui asks GitHub in the background whether there is a
+newer release (at most once a day; the answer is cached) and, if so, says so in
+the header, with a reminder to run `--upgrade`. It never upgrades by itself.
+`-no-update-check` turns the check off; builds without a release version
+(`dev`) don't make it.
+
 Run it from anywhere:
 
 ```bash
@@ -47,6 +53,7 @@ Run it from anywhere:
 ./quickemu-tui ~/vms           # or -dir ~/vms
 ./quickemu-tui -quickemu /opt/quickemu/quickemu
 ./quickemu-tui -no-mouse       # leave the mouse to the terminal
+./quickemu-tui -no-update-check  # don't look for a newer release
 ```
 
 Needs `quickemu` and `qemu-img` on `PATH`. `xdg-open` and `ssh` are only used

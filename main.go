@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -150,6 +151,7 @@ func main() {
 	quickemu := flag.String("quickemu", "", "path to quickemu (default: found on PATH)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	doUpgrade := flag.Bool("upgrade", false, "download the latest release for this machine from GitHub and replace this binary")
+	noUpdateCheck := flag.Bool("no-update-check", false, "don't look for a newer release in the background (done at most once a day)")
 	noMouse := flag.Bool("no-mouse", false, "don't use the mouse, leaving it to the terminal (e.g. for selecting text without holding shift)")
 	flag.Parse()
 	if *showVersion {
@@ -197,13 +199,24 @@ func main() {
 		}
 	}
 
+	updateCachePath := ""
 	if dir, err := os.UserCacheDir(); err == nil {
 		cacheDir := filepath.Join(dir, "quickemu-tui")
 		opts.CachePath = filepath.Join(cacheDir, seed.CatalogFile)
+		updateCachePath = filepath.Join(cacheDir, "update-check.json")
 		// a first run starts from the lists this build carries, rather than
 		// waiting minutes for quickget
 		if err := seed.Unpack(cacheDir); err != nil {
 			fmt.Fprintln(os.Stderr, "quickemu-tui: couldn't seed the cache:", err)
+		}
+	}
+
+	if !*noUpdateCheck {
+		opts.CheckUpdate = func(ctx context.Context) (string, error) {
+			return upgrade.Check(ctx, upgrade.Options{
+				Current: version,
+				APIBase: os.Getenv("QUICKEMU_TUI_API_BASE"),
+			}, updateCachePath, time.Now())
 		}
 	}
 

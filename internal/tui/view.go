@@ -102,7 +102,24 @@ func (m Model) viewHeader() string {
 		h += "  " + m.spin.View()
 	}
 	h += m.installHeader()
-	return withRightText(h, m.versionLabel(), m.width)
+	return withRightText(h, m.headerRightTexts(), m.width)
+}
+
+// headerRightTexts are the candidates for the header's right edge, longest
+// first: the upgrade notice (when there is one) shortens, then gives way to the
+// version alone.
+func (m Model) headerRightTexts() []string {
+	version := dimStyle.Render(m.versionLabel())
+	if m.updateAvailable == "" {
+		return []string{version}
+	}
+	notice := "v" + m.updateAvailable + " available"
+	sep := "  "
+	return []string{
+		warnStyle.Render(notice+", run quickemu-tui --upgrade") + sep + version,
+		warnStyle.Render(notice) + sep + version,
+		version,
+	}
 }
 
 // versionLabel is the header's version, e.g. "v0.1.5" ("dev" for local builds).
@@ -114,17 +131,18 @@ func (m Model) versionLabel() string {
 	return "v" + v
 }
 
-// withRightText pads line so text sits at its right edge, within width. The
-// text is dropped when the line is too long to leave room for it.
-func withRightText(line, text string, width int) string {
-	if text == "" {
-		return line
+// withRightText pads line so the first of texts that fits sits at its right
+// edge, within width. Nothing is added when none leaves room for it.
+func withRightText(line string, texts []string, width int) string {
+	for _, text := range texts {
+		if text == "" {
+			continue
+		}
+		if gap := width - lipgloss.Width(line) - lipgloss.Width(text); gap >= 2 {
+			return line + strings.Repeat(" ", gap) + text
+		}
 	}
-	gap := width - lipgloss.Width(line) - lipgloss.Width(text)
-	if gap < 2 {
-		return line
-	}
-	return line + strings.Repeat(" ", gap) + dimStyle.Render(text)
+	return line
 }
 
 func (m Model) viewFooter() string {

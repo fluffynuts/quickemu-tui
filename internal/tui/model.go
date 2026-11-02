@@ -63,6 +63,10 @@ type Options struct {
 	Defaults   []string // default .conf lines, merged into VMs (see qemu.MergeDefaults)
 	SSHUser    string   // user last SSHed in as; empty means the current user
 	Version    string   // shown in the header's top-right corner; empty hides it
+
+	// CheckUpdate, if set, runs once in the background at startup and returns
+	// the version of a newer release, or "" when there isn't one.
+	CheckUpdate func(ctx context.Context) (string, error)
 }
 
 // vmInfo is gathered off the UI thread on every poll, so View() never does IO.
@@ -110,6 +114,8 @@ type Model struct {
 
 	flash    string
 	flashErr bool
+
+	updateAvailable string // version of a newer release, once the background check has found one
 
 	input        textinput.Model
 	promptTitle  string
@@ -263,7 +269,29 @@ func New(opts Options) Model {
 // Init starts polling.
 func (m Model) Init() tea.Cmd {
 	return batch(tick(), gatherCmd(m.vms), m.loadSelectedDisk(),
-		m.initCatalogCmd())
+		m.initCatalogCmd(), m.checkUpdateCmd())
+}
+
+// updateMsg is the result of the background update check; latest is empty when
+// there is nothing to announce.
+type updateMsg struct{ latest string }
+
+// checkUpdateCmd asks for a newer release off the UI thread. A failure (most
+// often being offline) announces nothing: it isn't something the user can act
+// on, and the next start asks again.
+func (m Model) checkUpdateCmd() tea.Cmd {
+	check := m.opts.CheckUpdate
+	if check == nil {
+		return nil
+	}
+	ctx := m.bg
+	return func() tea.Msg {
+		latest, err := check(ctx)
+		if err != nil {
+			return updateMsg{}
+		}
+		return updateMsg{latest: latest}
+	}
 }
 
 func (m Model) initCatalogCmd() tea.Cmd {
@@ -607,6 +635,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
+
+	case updateMsg:
+		m.updateAvailable = msg.latest
+		return m, nil
 
 	case tickMsg:
 		m.rediscover()
