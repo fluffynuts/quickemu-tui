@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"time"
 )
 
@@ -47,7 +48,10 @@ func ParseDiskInfo(data []byte) (DiskInfo, error) {
 		return DiskInfo{}, fmt.Errorf("parsing qemu-img output: %w", err)
 	}
 	info := DiskInfo{VirtualSize: raw.VirtualSize, ActualSize: raw.ActualSize}
-	for _, s := range raw.Snapshots {
+	// Reversed first so that snapshots with equal dates keep the later-listed
+	// one on top once the stable sort below orders by date.
+	for i := len(raw.Snapshots) - 1; i >= 0; i-- {
+		s := raw.Snapshots[i]
 		info.Snapshots = append(info.Snapshots, Snapshot{
 			ID:          s.ID,
 			Name:        s.Name,
@@ -55,6 +59,9 @@ func ParseDiskInfo(data []byte) (DiskInfo, error) {
 			VMStateSize: s.VMStateSize,
 		})
 	}
+	sort.SliceStable(info.Snapshots, func(i, j int) bool {
+		return info.Snapshots[i].Date.After(info.Snapshots[j].Date)
+	})
 	return info, nil
 }
 

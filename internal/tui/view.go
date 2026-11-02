@@ -341,11 +341,11 @@ func (m Model) viewSnapshots(vm qemu.VM, inner, rows int) []string {
 		return append(out, dimStyle.Render(trunc("none yet: c creates one (e.g. 'pristine')", inner)))
 	}
 
-	const format = "%-4s %-22s %-16s %s"
-	out = append(out, dimStyle.Render(trunc(fmt.Sprintf(format, "ID", "TAG", "DATE", "VM STATE"), inner)))
+	const format = "%-22s %s"
+	out = append(out, dimStyle.Render(trunc(fmt.Sprintf(format, "TAG", "DATE"), inner)))
 	items := make([]string, 0, len(ds.info.Snapshots))
 	for i, s := range ds.info.Snapshots {
-		line := trunc(fmt.Sprintf(format, s.ID, s.Name, s.Date.Format("2006-01-02 15:04"), qemu.HumanSize(s.VMStateSize)), inner)
+		line := trunc(fmt.Sprintf(format, s.Ref(), s.Date.Format("2006-01-02 15:04")), inner)
 		if i == m.snapCursor && m.pane == paneSnapshots {
 			line = selStyle.Render(line)
 		}

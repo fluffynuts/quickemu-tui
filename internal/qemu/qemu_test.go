@@ -217,6 +217,38 @@ func TestParseDiskInfo(t *testing.T) {
 	}
 }
 
+func TestParseDiskInfoListsLatestSnapshotFirst(t *testing.T) {
+	// ids deliberately disagree with dates: the newest snapshot has the lowest id
+	payload := `{"snapshots": [
+		{"id": "1", "name": "newest", "date-sec": 3000},
+		{"id": "2", "name": "oldest", "date-sec": 1000},
+		{"id": "3", "name": "middle", "date-sec": 2000}]}`
+	info, err := ParseDiskInfo([]byte(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, s := range info.Snapshots {
+		names = append(names, s.Name)
+	}
+	if got := strings.Join(names, ","); got != "newest,middle,oldest" {
+		t.Fatalf("order = %s, want newest,middle,oldest", got)
+	}
+}
+
+func TestParseDiskInfoBreaksDateTiesByLaterListedFirst(t *testing.T) {
+	payload := `{"snapshots": [
+		{"id": "1", "name": "a", "date-sec": 1000},
+		{"id": "2", "name": "b", "date-sec": 1000}]}`
+	info, err := ParseDiskInfo([]byte(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Snapshots[0].Name != "b" || info.Snapshots[1].Name != "a" {
+		t.Fatalf("got %+v, want b before a", info.Snapshots)
+	}
+}
+
 func TestValidateTag(t *testing.T) {
 	for _, ok := range []string{"pristine", "after-ie.2", "snap_1"} {
 		if err := ValidateTag(ok); err != nil {
